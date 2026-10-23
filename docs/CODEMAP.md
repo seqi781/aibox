@@ -40,6 +40,7 @@ docs/
   GUIDE.md                     使用指南（aibox guide）
   ARCHITECTURE.md              架构、威胁模型、已知限制
   CODEMAP.md                   本文件
+  media/                       README 终端动画、MP4、截图及脱敏后的录制数据
 AGENTS.md / CLAUDE.md          agent 自动读取的操作规则与安全边界
 tests/                         兼容性测试（tests/run.sh；见第 6 节）
 （宣传站已迁出，本仓库只维护终端工具及其文档）

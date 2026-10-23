@@ -1,5 +1,10 @@
 /config/
 /.aibox/
+# 本地 Claude 配置、会话与个人说明，不随项目发布
+/.claude/
+/.claude.json
+/.claude.json.*
+/CLAUDE.local.md
 __pycache__/
 *.pyc
 .DS_Store

@@ -2,6 +2,12 @@
 
 **为 Claude Code 等 AI 编程工具提供独立网络出口与宿主机隔离的 Docker 终端。** 支持 **macOS 和 Linux**，Windows 可在 WSL2 中使用。
 
+![aibox：从部署到 Claude Code 首次登录的真实终端动画](docs/media/aibox-deploy-to-use.gif)
+
+[下载完整视频 · 1080p MP4](https://github.com/seqi781/aibox/raw/refs/heads/main/docs/media/aibox-deploy-to-use.mp4) · [宣传封面与全部素材](docs/media/README.md)
+
+演示包含获取源码、初始化、导入并测试节点、启动容器、验证断线阻断，以及 Claude Code 的自动安装与首次登录入口。基于真实终端输出制作，凭据输入隐藏，公网 IP 已脱敏，等待时间已压缩；没有登录个人账号或发起模型请求。
+
 aibox 的核心用途是：让 Claude Code 在容器里通过远程代理或 VPN 联网，尽量避免向 AI 服务直接暴露宿主机的真实公网 IP 和本机环境信息，以降低相关账号风控与封号风险。Codex 等终端工具也可以使用同一套环境。
 
 **aibox 不保证防封号，也不提供完整的机器指纹伪装。** 它提供网络与文件隔离；账号身份、使用行为、出口 IP 信誉和服务规则仍会影响账号状态。具体保护范围见下方说明。
@@ -14,6 +20,10 @@ aibox 的核心用途是：让 Claude Code 在容器里通过远程代理或 VPN
 - **人和 AI 都能配置**：人用交互式向导；AI agent 用非交互命令（见 [AGENTS.md](AGENTS.md)）
 
 文档：[使用指南](docs/GUIDE.md) · [架构与安全设计](docs/ARCHITECTURE.md) · [代码地图](docs/CODEMAP.md) · [AI agent 操作规则](AGENTS.md)
+
+| 容器启动 | 网络隔离与断线阻断体检 |
+|---|---|
+| [![aibox 容器启动实录](docs/media/deployment.png)](docs/media/deployment.png) | [![aibox 网络隔离体检实录](docs/media/network-check.png)](docs/media/network-check.png) |
 
 ## 真实 IP、机器信息与账号风险
 
