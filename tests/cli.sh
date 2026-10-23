@@ -97,6 +97,7 @@ expect "projects 输出两个项目" [ "$(./aibox projects | wc -l | tr -d ' ')"
 run 1 ./aibox config tools claude
 run 0 ./aibox import "$VL" --no-test
 run 1 ./aibox test
+run 1 ./aibox report
 run 0 ./aibox config set AIBOX_TZ Asia/Tokyo
 run 0 ./aibox config set AIBOX_LANG ja_JP.UTF-8
 run 0 ./aibox config ports 3000,8080:80

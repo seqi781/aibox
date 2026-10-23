@@ -23,7 +23,23 @@ aibox config          # 之后修改任何配置，再次运行向导即可（�
 | 2 网络出口 | 粘贴订阅或分享链接（也支持 Clash 节点 / WireGuard / 商业 VPN） | 自动识别格式，**立即测试**并汇报可用节点、延迟、出口 IP 和地区；测试不通过可以重新输入 |
 | 3 授权目录 | 目录路径（支持 Tab 补全）+ rw/ro | 只有这里的目录对容器可见。检测到 SELinux 时多问一句 |
 
-最后会问是否安装 `aibox` / `ai` 命令、是否立即启动、是否运行体检。
+最后会问是否安装 `aibox` / `ai` 命令、是否立即启动。启动后自动输出**环境检测报告**（之后随时用 `aibox report` 重新检测）：
+
+| 部分 | 内容 | 数据来源 |
+|---|---|---|
+| 本机 | 真实 IPv4 / IPv6、时区、本机 DNS 来源 | 本机直连 ipinfo.io、ipify、Google DNS |
+| 出口 | 代理后的 IP、国家 / 地区、城市、运营商、IP 归属（ASN）、时区 | 经代理查询 ipinfo.io、proxycheck.io、ip-api.com |
+| IP 类型与风险 | 机房 / 住宅 / 移动网络、proxycheck 风险评分、是否被标记为代理 / VPN / Tor、StopForumSpam 滥用记录 | 经代理查询 |
+| DNS | 容器的 DNS 由谁解析、是否携带本机网段（泄漏检测） | 容器内查询 `o-o.myaddr.l.google.com` |
+| 一致性 | 容器时区和语言是否与出口一致、网络隔离体检是否通过 | 容器内检测 + `aibox doctor` |
+| 综合判定 | 汇总以上各项，用一句话判定高 / 中 / 低风险 | — |
+
+判定规则：
+- **高风险**（任一项）：出口与本机 IP 相同、DNS 或 IPv6 泄漏、隔离体检失败、风险评分 ≥ 67、Tor / 失陷主机、StopForumSpam 有高置信度记录、出口地区可能不受 AI 服务支持。
+- **中风险**：机房 IP、被标记为代理 / VPN、风险评分 34–66、少量滥用记录、时区与出口不一致。
+- **低风险**：以上都没有。
+
+proxycheck.io 免费额度每天有限，查不到的项目会注明"未能检测"，不计入判定。
 
 其余的都自动处理，不需要你选：
 - **时区和语言**：按出口 IP 的地区自动设置（例如出口在日本，就是 `Asia/Tokyo` + `ja_JP.UTF-8`），每次 `aibox up` 都会重新检测。要固定的话，用 `aibox config set AIBOX_TZ …` / `AIBOX_LANG …`。
@@ -97,6 +113,7 @@ tmux 常用键：`Ctrl+b d` 离开（任务继续运行）· `Ctrl+b c` 新窗�
 | `aibox mounts add [rw\|ro] <路径> [-> <名字>]` | 授权目录（默认 rw） |
 | `aibox mounts rm <名字\|路径>` / `aibox mounts` | 取消授权 / 查看列表 |
 | `aibox test` | 重新测试当前代理：可用节点、延迟、出口 IP、地区 |
+| `aibox report` | 环境检测报告：本机 / 出口 IP、IP 类型与风险、DNS、一致性、综合判定（简写 `ai r`） |
 | `printf %s "$KEY" \| aibox config key ANTHROPIC_API_KEY` | 保存 API Key（只从标准输入读取；用账号登录的不需要） |
 | `aibox config key ANTHROPIC_API_KEY --unset` | 删除 API Key |
 | `aibox config set AIBOX_TZ Asia/Shanghai` / `config get <键>` | 修改 / 读取其它选项 |

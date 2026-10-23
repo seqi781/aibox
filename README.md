@@ -38,6 +38,7 @@ ai c myapp --yolo   # 跳过逐条确认（容器即沙箱）
 ai s                # 进入普通终端（tmux）
 ai ls               # 查看所有会话
 ai st               # 状态和出口 IP
+ai r                # 环境检测报告：出口 IP 类型与风险、DNS、时区一致性，判定高 / 中 / 低风险
 ai q                # 停止
 ```
 

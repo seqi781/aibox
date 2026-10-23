@@ -195,6 +195,9 @@ load_env() {
   fi
 }
 
+# 构建时不附带 provenance 证明：它带有构建时间，会让镜像 ID 每次都变，导致每次 up 都重建容器（中断 tmux 会话）
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
 compose() {
   docker compose --project-directory "$ROOT" \
     -f "$ROOT/compose.yaml" -f "$ROOT/gateways/$AIBOX_GATEWAY.yaml" -f "$GEN" "$@"
@@ -927,12 +930,12 @@ cmd_wizard() {
   if [ "$HOST_OS" != windows ] && ! command -v aibox >/dev/null 2>&1; then
     echo; yesno "安装 aibox 命令（以后在任意目录直接输入 aibox / ai）？" y && cmd_install || true
   fi
-  [ "$start" = no ] && { echo; echo "下一步: ${B}aibox up${N}"; return 0; }
+  [ "$start" = no ] && { echo; echo "下一步: ${B}aibox up${N}，然后 ${B}aibox report${N} 查看环境检测报告"; return 0; }
   [ "$start" = ask ] || return 0
   echo
   if yesno "现在启动？（首次需构建镜像，约 3-5 分钟）" y; then
     cmd_up
-    echo; yesno "运行网络隔离体检？" y && ( cmd_doctor ) || true
+    echo; ( cmd_report ) || true
     echo; echo "开始使用: ${B}aibox claude${N} <项目>  或  ${B}aibox codex${N} <项目>（第一次运行时自动安装）  终端: ${B}aibox shell${N}"
   fi
 }
@@ -1353,7 +1356,7 @@ cmd_install() {
 }
 
 cmd_completion() {
-  local cmds="init import test config up shell claude codex gemini opencode sessions exec stop restart down status doctor mounts logs setup rebuild guide install destroy help"
+  local cmds="init import test report config up shell claude codex gemini opencode sessions exec stop restart down status doctor mounts logs setup rebuild guide install destroy help"
   case "${1:-bash}" in
     zsh) cat <<EOF
 # macOS 自带的 zsh 默认没有启用补全系统；没有 compdef 时先初始化
@@ -1493,6 +1496,190 @@ EOF
   if [ "$FAIL" -eq 0 ]; then echo "${G}${B}全部通过${N} ($PASS 项)"; else echo "${R}${B}$FAIL 项失败${N}, $PASS 项通过"; exit 1; fi
 }
 
+# ---------- 环境检测报告：本机 / 出口 IP / IP 类型与风险 / DNS / 一致性 / 综合结论 ----------
+# 出口相关的查询都在 workspace 里经代理发出；只有"本机"一节从宿主机直连查询。
+
+# 在 workspace 中经隧道收集出口信息，输出 KEY=VALUE（用容器里的 jq 解析 JSON）
+REPORT_COLLECT='
+set +e
+q() { curl -fsS --max-time 12 "$@" 2>/dev/null; }
+j="$(q https://ipinfo.io/json)"
+ip="$(printf "%s" "$j" | jq -r ".ip // empty")"
+[ -n "$ip" ] || ip="$(q https://api.ipify.org)"
+echo "X_IP=$ip"
+printf "%s" "$j" | jq -r "\"X_CC=\(.country // \"\")\nX_REGION=\(.region // \"\")\nX_CITY=\(.city // \"\")\nX_ORG=\(.org // \"\")\nX_TZ=\(.timezone // \"\")\"" 2>/dev/null
+[ -n "$ip" ] || exit 0
+p="$(q "https://proxycheck.io/v3/$ip")"
+if [ "$(printf "%s" "$p" | jq -r ".status" 2>/dev/null)" = ok ]; then
+  echo "PC_OK=1"
+  printf "%s" "$p" | jq -r --arg ip "$ip" ".[\$ip] | \"PC_TYPE=\(.network.type // \"\")\nPC_PROVIDER=\(.network.provider // \"\")\nPC_ORG=\(.network.organisation // \"\")\nPC_ASN=\(.network.asn // \"\")\nPC_COUNTRY=\(.location.country_name // \"\")\nPC_TZ=\(.location.timezone // \"\")\nPC_PROXY=\(.detections.proxy)\nPC_VPN=\(.detections.vpn)\nPC_TOR=\(.detections.tor)\nPC_HOSTING=\(.detections.hosting)\nPC_ANON=\(.detections.anonymous)\nPC_COMP=\(.detections.compromised)\nPC_RISK=\(.detections.risk // \"\")\"" 2>/dev/null
+fi
+a="$(q "http://ip-api.com/json/$ip?fields=status,country,regionName,isp,org,as,mobile,proxy,hosting,timezone")"
+if [ "$(printf "%s" "$a" | jq -r ".status" 2>/dev/null)" = success ]; then
+  echo "IA_OK=1"
+  printf "%s" "$a" | jq -r "\"IA_COUNTRY=\(.country)\nIA_REGION=\(.regionName)\nIA_ISP=\(.isp)\nIA_AS=\(.as)\nIA_TZ=\(.timezone)\nIA_MOBILE=\(.mobile)\nIA_PROXY=\(.proxy)\nIA_HOSTING=\(.hosting)\"" 2>/dev/null
+fi
+s="$(q "https://api.stopforumspam.org/api?ip=$ip&json")"
+if [ "$(printf "%s" "$s" | jq -r ".success" 2>/dev/null)" = 1 ]; then
+  echo "SFS_OK=1"
+  printf "%s" "$s" | jq -r "\"SFS_APPEARS=\(.ip.appears // 0)\nSFS_FREQ=\(.ip.frequency // 0)\nSFS_LAST=\(.ip.lastseen // \"\")\nSFS_CONF=\(.ip.confidence // 0)\"" 2>/dev/null
+fi
+t="$(dig +short +time=5 +tries=1 TXT o-o.myaddr.l.google.com 2>/dev/null | tr -d "\"")"
+r="$(printf "%s\n" "$t" | grep -v edns0 | head -1)"
+echo "DNS_IP=$r"
+echo "DNS_ECS=$(printf "%s\n" "$t" | sed -n "s/^edns0-client-subnet //p" | head -1)"
+if [ -n "$r" ]; then
+  printf "%s" "$(q "https://ipinfo.io/$r/json")" | jq -r "\"DNS_ORG=\(.org // \"\")\nDNS_CC=\(.country // \"\")\"" 2>/dev/null
+fi
+if curl -6 -fsS -o /dev/null --max-time 5 https://api6.ipify.org 2>/dev/null; then echo "WS_V6=1"; else echo "WS_V6=0"; fi
+echo "WS_TZ=$(sed -n "s/^TZ=//p" ~/.config/aibox/locale.env 2>/dev/null)"
+echo "WS_LANG=$(sed -n "s/^LANG=//p" ~/.config/aibox/locale.env 2>/dev/null)"
+'
+
+# 解析 KEY=VALUE 输出到 R_<KEY> 变量（只接受预期格式的键）
+report_parse() {
+  local line k v
+  while IFS= read -r line; do
+    k="${line%%=*}"; v="${line#*=}"
+    case "$k" in *[!A-Z0-9_]*|'') continue ;; esac
+    [ "$v" = null ] && v=""
+    printf -v "R_$k" '%s' "$v"
+  done
+}
+
+host_tz() {
+  local l; l="$(readlink /etc/localtime 2>/dev/null || true)"
+  case "$l" in *zoneinfo/*) echo "${l##*zoneinfo/}"; return ;; esac
+  [ -f /etc/timezone ] && { cat /etc/timezone; return; }
+  echo "${TZ:-未知}"
+}
+
+# 本机 DNS 解析器（谁在替本机向外查询）
+host_dns_resolver() {
+  local t=""
+  if command -v dig >/dev/null 2>&1; then
+    t="$(dig +short +time=4 +tries=1 TXT o-o.myaddr.l.google.com 2>/dev/null | tr -d '"' | grep -v edns0 | head -1)"
+  elif command -v nslookup >/dev/null 2>&1; then
+    t="$(nslookup -type=TXT o-o.myaddr.l.google.com 2>/dev/null | sed -n 's/.*text = "\([0-9a-fA-F.:]*\)".*/\1/p' | head -1)"
+  fi
+  printf '%s' "$t"
+}
+
+# 可能不在主流 AI 服务支持范围内的地区（以各服务商公布的列表为准）
+ai_unsupported_region() { case "$1" in CN|HK|MO|RU|BY|IR|KP|SY|CU) return 0 ;; esac; return 1; }
+
+cmd_report() {
+  ensure_up
+  # 所有 R_* 先清空（bash 3.2 下 set -u 需要变量存在）
+  local v
+  for v in X_IP X_CC X_REGION X_CITY X_ORG X_TZ PC_OK PC_TYPE PC_PROVIDER PC_ORG PC_ASN PC_COUNTRY PC_TZ PC_PROXY PC_VPN PC_TOR \
+           PC_HOSTING PC_ANON PC_COMP PC_RISK IA_OK IA_COUNTRY IA_REGION IA_ISP IA_AS IA_TZ IA_MOBILE IA_PROXY IA_HOSTING \
+           SFS_OK SFS_APPEARS SFS_FREQ SFS_LAST SFS_CONF DNS_IP DNS_ECS DNS_ORG DNS_CC WS_V6 WS_TZ WS_LANG; do
+    printf -v "R_$v" '%s' ""
+  done
+  echo "${B}环境检测报告${N}  ${D}（出口相关的查询都经代理发出）${N}"
+  echo "  正在检测…"
+
+  # ---- 本机（直连）----
+  local hj h_ip h_org h_cc h_city h_v6 h_tz h_dns h_dns_org=""
+  hj="$(curl -4 -fsS --max-time 8 https://ipinfo.io/json 2>/dev/null || true)"
+  h_ip="$(jf ip "$hj")"; h_org="$(jf org "$hj")"; h_cc="$(jf country "$hj")"; h_city="$(jf city "$hj")"
+  [ -n "$h_ip" ] || h_ip="$(curl -4 -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
+  h_v6="$(curl -6 -fsS --max-time 5 https://api6.ipify.org 2>/dev/null || true)"
+  h_tz="$(host_tz)"; h_dns="$(host_dns_resolver)"
+  [ -n "$h_dns" ] && h_dns_org="$(jf org "$(curl -fsS --max-time 6 "https://ipinfo.io/$h_dns/json" 2>/dev/null || true)")"
+
+  # ---- 出口（经代理）----
+  report_parse < <(docker exec "$WS" bash -c "$REPORT_COLLECT" 2>/dev/null)
+  local doc_ok=1; ( cmd_doctor ) >/dev/null 2>&1 || doc_ok=0
+
+  # ---- 判定 ----
+  local high="" mid="" note="" type="未知" asn_x="" asn_h="" asn_d=""
+  add_high() { high="${high}${high:+；}$1"; }
+  add_mid()  { mid="${mid}${mid:+；}$1"; }
+  if [ "$R_PC_HOSTING" = true ] || [ "$R_IA_HOSTING" = true ] || [ "$R_PC_TYPE" = Hosting ]; then type="机房 / 云服务器（Hosting）"
+  elif [ "$R_IA_MOBILE" = true ] || [ "$R_PC_TYPE" = Wireless ]; then type="移动网络"
+  else case "$R_PC_TYPE" in Residential) type="住宅宽带" ;; Business) type="企业网络" ;; Education) type="教育网" ;; '') ;; *) type="$R_PC_TYPE" ;; esac; fi
+  asn_x="$(printf '%s' "${R_X_ORG:-$R_IA_AS}" | awk '{print $1}')"; asn_h="$(printf '%s' "$h_org" | awk '{print $1}')"
+  asn_d="$(printf '%s' "$R_DNS_ORG" | awk '{print $1}')"
+
+  [ "$doc_ok" = 1 ] || add_high "网络隔离体检有失败项（aibox doctor 查看）"
+  if [ -z "$R_X_IP" ]; then add_high "容器无法联网或查不到出口 IP"; fi
+  if [ -n "$R_X_IP" ] && [ "$R_X_IP" = "$h_ip" ]; then add_high "出口 IP 与本机相同，流量没有经过远程节点"; fi
+  ai_unsupported_region "${R_X_CC:-}" && add_high "出口地区（${R_X_CC}）可能不在 AI 服务的支持范围内"
+  [ "$R_WS_V6" = 1 ] && add_high "容器内 IPv6 可以直接出网（泄漏）"
+  if [ -n "$asn_d" ] && [ -n "$asn_h" ] && [ "$asn_d" = "$asn_h" ] && [ "$asn_d" != "$asn_x" ]; then add_high "DNS 泄漏：容器的 DNS 由本机运营商解析"; fi
+  if [ -n "$R_DNS_ECS" ] && [ -n "$h_ip" ] && [ "${R_DNS_ECS%.*}" = "${h_ip%.*}" ] && [ "${R_X_IP%.*}" != "${h_ip%.*}" ]; then add_high "DNS 泄漏：DNS 查询携带了本机 IP 网段"; fi
+  [ "$R_PC_TOR" = true ] && add_high "出口被识别为 Tor 节点"
+  [ "$R_PC_COMP" = true ] && add_high "出口 IP 被标记为失陷主机"
+  case "$R_PC_RISK" in ''|*[!0-9]*) ;; *) if [ "$R_PC_RISK" -ge 67 ]; then add_high "proxycheck 风险评分高（${R_PC_RISK}/100）"; elif [ "$R_PC_RISK" -ge 34 ]; then add_mid "proxycheck 风险评分中等（${R_PC_RISK}/100）"; fi ;; esac
+  if [ "${R_SFS_APPEARS:-0}" != 0 ]; then
+    if awk -v c="${R_SFS_CONF:-0}" 'BEGIN{exit !(c >= 50)}'; then add_high "StopForumSpam 有滥用记录（${R_SFS_FREQ} 次，置信度 ${R_SFS_CONF}%）"
+    else add_mid "StopForumSpam 有少量滥用记录（${R_SFS_FREQ} 次）"; fi
+  fi
+  case "$type" in 机房*) add_mid "出口是机房 IP（${R_PC_PROVIDER:-$R_IA_ISP}），AI 服务对这类 IP 更容易要求验证或限制" ;; esac
+  if [ "$R_PC_PROXY" = true ] || [ "$R_PC_VPN" = true ] || [ "$R_PC_ANON" = true ] || [ "$R_IA_PROXY" = true ]; then add_mid "出口被标记为代理 / VPN"; fi
+  if [ -n "$R_WS_TZ" ] && [ -n "$R_X_TZ" ] && [ "$R_WS_TZ" != "$R_X_TZ" ]; then add_mid "容器时区（${R_WS_TZ}）与出口地区（${R_X_TZ}）不一致"; fi
+  if [ -n "$R_DNS_CC" ] && [ -n "$R_X_CC" ] && [ "$R_DNS_CC" != "$R_X_CC" ] && [ "$R_DNS_CC" = "$h_cc" ] && [ "$h_cc" != "$R_X_CC" ]; then add_mid "DNS 解析地区（${R_DNS_CC}）与出口不一致，而与本机相同"; fi
+  [ -z "$R_PC_OK" ] && note="${note}proxycheck.io "
+  [ -z "$R_SFS_OK" ] && note="${note}StopForumSpam "
+  [ -z "$R_IA_OK" ] && note="${note}ip-api.com "
+
+  # ---- 输出 ----
+  local ok="${G}✔${N}" warn_="${Y}!${N}" bad_="${R}✘${N}"
+  yn() { case "$1" in true) printf '是' ;; false) printf '否' ;; *) printf '未知' ;; esac; }
+  echo
+  echo "${B}本机${N}  ${D}（直连，不经代理）${N}"
+  echo "  IPv4      ${h_ip:-查询失败}${h_org:+（$h_cc $h_city · ${h_org}）}"
+  echo "  IPv6      ${h_v6:-无}$([ "$R_WS_V6" = 1 ] && echo "  ${bad_} 容器内 IPv6 可以出网" || echo "  ${ok} 容器内 IPv6 已禁用")"
+  echo "  时区      $h_tz"
+  echo "  DNS 来源  ${h_dns:-未知}${h_dns_org:+（${h_dns_org}）}  ${D}本机自己的 DNS，只影响宿主机，不影响容器${N}"
+
+  echo "${B}出口${N}  ${D}（容器经代理）${N}"
+  echo "  IP        ${R_X_IP:-查询失败}"
+  echo "  国家/地区 ${R_PC_COUNTRY:-${R_IA_COUNTRY:-$R_X_CC}}（${R_X_CC:-?}）${R_X_REGION:+ · $R_X_REGION}"
+  echo "  城市      ${R_X_CITY:-未知}"
+  echo "  运营商    ${R_PC_PROVIDER:-${R_IA_ISP:-未知}}"
+  echo "  IP 归属   ${R_X_ORG:-${R_IA_AS:-未知}}${R_PC_ORG:+（${R_PC_ORG}）}"
+  echo "  时区      ${R_X_TZ:-未知}$([ -n "$R_PC_TZ" ] && [ "$R_PC_TZ" != "$R_X_TZ" ] && echo "（proxycheck: ${R_PC_TZ}）")"
+
+  echo "${B}IP 类型与风险${N}"
+  echo "  类型      $type"
+  if [ -n "$R_PC_OK" ]; then
+    echo "  风险评分  ${R_PC_RISK:-?}/100  ${D}proxycheck.io（0-33 低 · 34-66 中 · 67+ 高）${N}"
+    echo "  代理标记  proxycheck：代理 $(yn "$R_PC_PROXY") · VPN $(yn "$R_PC_VPN") · Tor $(yn "$R_PC_TOR") · 匿名 $(yn "$R_PC_ANON")${R_IA_OK:+    ip-api：代理 $(yn "$R_IA_PROXY")}"
+  else
+    echo "  风险评分  ${warn_} proxycheck.io 查询失败（免费额度每天有限，稍后再试）"
+    [ -n "$R_IA_OK" ] && echo "  代理标记  ip-api：代理 $(yn "$R_IA_PROXY") · 机房 $(yn "$R_IA_HOSTING")"
+  fi
+  if [ -n "$R_SFS_OK" ]; then
+    if [ "${R_SFS_APPEARS:-0}" = 0 ]; then echo "  滥用记录  ${ok} StopForumSpam 无记录"
+    else echo "  滥用记录  ${bad_} StopForumSpam 出现 ${R_SFS_FREQ} 次，最近 ${R_SFS_LAST:-?}，置信度 ${R_SFS_CONF}%"; fi
+  else echo "  滥用记录  ${warn_} StopForumSpam 查询失败"; fi
+
+  echo "${B}DNS${N}"
+  echo "  容器 DNS 来源  ${R_DNS_IP:-查询失败}${R_DNS_ORG:+（$R_DNS_CC · ${R_DNS_ORG}）}${R_DNS_ECS:+  ECS $R_DNS_ECS}"
+  case "$high" in *DNS*) echo "  ${bad_} DNS 泄漏" ;; *) [ -n "$R_DNS_IP" ] && echo "  ${ok} 没有经本机运营商解析，也没有携带本机 IP 网段" ;; esac
+
+  echo "${B}一致性${N}"
+  if [ -n "$R_WS_TZ" ] && [ "$R_WS_TZ" = "$R_X_TZ" ]; then echo "  ${ok} 容器时区 ${R_WS_TZ} 与出口一致"
+  elif [ -n "$R_WS_TZ" ]; then echo "  ${warn_} 容器时区 ${R_WS_TZ}，出口时区 ${R_X_TZ:-未知}"; fi
+  [ -n "$R_WS_LANG" ] && echo "  ${ok} 容器语言 ${R_WS_LANG}（按出口国家设置）"
+  [ -n "$R_X_TZ" ] && [ "$h_tz" != "$R_X_TZ" ] && echo "  ${D}本机时区 ${h_tz} 与出口不同：只影响宿主机上的浏览器，不影响容器里的 AI 工具${N}"
+  [ "$doc_ok" = 1 ] && echo "  ${ok} 网络隔离体检通过（断线阻断、防火墙、权限，详见 aibox doctor）" || echo "  ${bad_} 网络隔离体检有失败项（aibox doctor）"
+
+  echo
+  if [ -n "$high" ]; then
+    echo "${R}${B}综合判定：高风险${N} —— ${high}${mid:+；另外：$mid}"
+  elif [ -n "$mid" ]; then
+    echo "${Y}${B}综合判定：中风险${N} —— ${mid}"
+  else
+    echo "${G}${B}综合判定：低风险${N} —— $([ "$type" = 未知 ] && echo "出口 IP" || echo "出口为${type}")，没有代理标记和滥用记录，DNS、时区与出口一致"
+  fi
+  [ -z "$note" ] || echo "  ${D}未能检测：${note}（不计入判定）${N}"
+  echo "  ${D}判定针对 AI 服务的风控（验证码、限制、封号）风险，仅供参考${N}"
+}
+
 usage() {
   cat <<EOF
 ${B}aibox${N} — Docker 中的 AI 编程终端（Claude Code / Codex），网络强制走代理/VPN
@@ -1525,6 +1712,7 @@ ${B}日常${N}                                                    ${D}简写${N}
 
 ${B}管理${N}
   mounts [add|rm]       授权目录: aibox mounts add ro ~/docs | aibox mounts rm docs
+  report                环境检测报告：本机/出口 IP、IP 类型与风险、DNS、一致性、综合判定   r
   doctor [--full]       网络与挂载体检（--full 含断线阻断测试）           d
   logs [gateway|workspace]   setup <工具…> | --upgrade   rebuild   down   destroy
   install [短命令名]    安装到 PATH（默认短命令 ai）并添加 Tab 补全
@@ -1550,6 +1738,7 @@ case "$cmd" in
   down) cmd_down ;;
   status|ps|st) cmd_status ;;
   doctor|check|d) cmd_doctor "$@" ;;
+  report|r) cmd_report ;;
   mounts|mount) cmd_mounts "$@" ;;
   projects) list_projects ;;
   logs|l) cmd_logs "$@" ;;
