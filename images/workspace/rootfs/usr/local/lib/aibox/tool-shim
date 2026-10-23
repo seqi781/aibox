@@ -1,0 +1,19 @@
+#!/bin/bash
+# /usr/local/bin/{claude,codex,gemini,opencode} 都链接到这里（排在 PATH 最后）。
+# 第一次运行时安装到持久化 home，然后用 exec 把自己替换成真正的程序：
+# 程序直接作为当前 shell 的前台任务运行，中间没有多余的进程（Ctrl+C、作业控制都正常）。
+tool="$(basename "$0")"
+self="$(readlink -f "$0")"
+find_real() {
+  local d IFS=:
+  for d in $PATH; do
+    if [ -x "$d/$tool" ] && [ "$(readlink -f "$d/$tool")" != "$self" ]; then printf '%s' "$d/$tool"; return 0; fi
+  done
+  return 1
+}
+if ! real="$(find_real)"; then
+  echo "第一次使用 ${tool}，正在安装（之后保存在持久化 home 中）…" >&2
+  aibox-setup "$tool" >&2 || { echo "${tool} 安装失败，检查网络后重试: aibox-setup ${tool}" >&2; exit 1; }
+  real="$(find_real)" || { echo "安装后仍找不到 ${tool}" >&2; exit 1; }
+fi
+exec "$real" "$@"

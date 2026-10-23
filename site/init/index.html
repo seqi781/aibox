@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aibox init 真实录制</title>
+<meta name="description" content="从零开始运行 ./aibox init 的真实终端录制：环境检查、导入订阅并实测节点、授权目录、构建启动和环境检测报告。链接和 IP 已脱敏。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0a09" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://SITE_DOMAIN/init/">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aibox">
+<meta property="og:title" content="aibox init 真实录制">
+<meta property="og:description" content="从零开始配置 aibox 的完整终端过程，链接和 IP 已脱敏。">
+<meta property="og:url" content="https://SITE_DOMAIN/init/">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="hdr">
+  <div class="shell bar">
+    <a class="logo" href="../" aria-label="aibox 首页"><i aria-hidden="true"></i>aibox</a>
+    <nav class="links" aria-label="页面导航">
+      <a href="../#how">原理</a>
+      <a href="../#start">上手</a>
+      <a href="../#doctor">体检</a>
+      <a href="../#faq">常见问题</a>
+    </nav>
+    <div class="hdr-r">
+      <a class="hdr-cta" href="https://github.com/OWNER/aibox">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+<section class="sec cast-page" aria-labelledby="cast-title">
+  <div class="shell">
+    <p class="eyebrow">REAL RECORDING · ./AIBOX INIT</p>
+    <h1 class="h2" id="cast-title">从零开始配置，<br>全程真实录制。</h1>
+    <p class="lede">在一台没有任何 aibox 配置、镜像和容器的机器上运行 <code>./aibox init</code>：环境检查、导入订阅并实测节点、授权目录、构建并启动，最后输出环境检测报告。下面是终端的原始输出按时间回放，不是视频，文字可以直接选中复制。</p>
+
+    <dl class="cast-meta">
+      <div><dt>录制日期</dt><dd data-cast-meta="recorded">—</dd></div>
+      <div><dt>系统</dt><dd data-cast-meta="os">—</dd></div>
+      <div><dt>Docker</dt><dd data-cast-meta="docker">—</dd></div>
+      <div><dt>aibox 版本</dt><dd data-cast-meta="commit">—</dd></div>
+      <div><dt>实际用时</dt><dd data-cast-meta="duration">—</dd></div>
+    </dl>
+
+    <div class="cast" data-cast-root>
+      <figure class="term cast-term">
+        <div class="term-bar"><span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>./aibox init</span><span class="tag">真实录制 · 订阅链接和 IP 已替换</span></div>
+        <div class="cast-view" tabindex="0" aria-label="终端回放">
+          <div class="cast-screen" aria-live="off"></div>
+          <noscript><p class="cast-nojs">回放需要启用 JavaScript。</p></noscript>
+        </div>
+        <figcaption class="term-foot cast-ctl">
+          <button class="mini" type="button" data-cast="play" aria-label="播放">播放</button>
+          <button class="mini" type="button" data-cast="speed" title="播放速度">1×</button>
+          <div class="cast-bar" data-cast="bar" role="slider" tabindex="0" aria-label="播放进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i data-cast="fill"></i></div>
+          <span class="cast-time" data-cast="time">录制时间 0:00</span>
+        </figcaption>
+      </figure>
+
+      <aside class="cast-side">
+        <h2>章节</h2>
+        <ol class="cast-chapters" data-cast="chapters"></ol>
+        <h2>关于这段录制</h2>
+        <ul class="ticks">
+          <li><span><b>输出原样保留</b>：颜色、换行和 Docker 的进度显示都来自真实终端，只做了下面两处替换。</span></li>
+          <li><span><b>脱敏</b>：粘贴的订阅链接换成了 <code>sub.example.com</code> 占位链接；所有公网 IP 换成文档保留地址（203.0.113.x 等），同一网段换成同一个保留网段。</span></li>
+          <li><span><b>等待被压缩</b>：构建镜像、测速这类超过 1.6 秒的停顿在回放里压缩了，进度条下方显示的是真实经过的时间。</span></li>
+          <li><span><b>可以复现</b>：录制脚本在仓库的 <code>site/tools/record-init.py</code>，代码更新后重新录一次即可。</span></li>
+        </ul>
+        <p class="cast-back"><a class="btn g" href="../#start">回到三步上手</a></p>
+      </aside>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="shell">
+    <div class="legal">
+      <p>aibox 是独立的开源项目，与 Anthropic、OpenAI 没有关联，也未获得其认可或背书。Claude Code、Codex 及相关名称是其各自所有者的商标，本站仅用于说明兼容性。</p>
+      <p>本站不使用 Cookie，不加载任何统计或追踪脚本，也不请求第三方资源。</p>
+    </div>
+  </div>
+</footer>
+
+<script src="cast.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/cast-player.js"></script>
+</body>
+</html>

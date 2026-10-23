@@ -36,7 +36,8 @@ RUN set -eux; \
     chown -R "$USER_UID:$USER_GID" /workspace "/home/$USERNAME"
 
 COPY rootfs/ /
-RUN chmod +x /usr/local/bin/aibox-*; \
+RUN chmod +x /usr/local/bin/aibox-* /usr/local/lib/aibox/tool-shim; \
+    for t in claude codex gemini opencode; do ln -sf /usr/local/lib/aibox/tool-shim "/usr/local/bin/$t"; done; \
     echo '[ -f /etc/aibox/bashrc ] && . /etc/aibox/bashrc' >> /etc/bash.bashrc
 
 USER ${USERNAME}

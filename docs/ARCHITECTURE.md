@@ -108,7 +108,7 @@ gluetun 自带 kill switch（iptables 只放行到 VPN 服务器的连接）、D
 - `/home/dev` 是命名卷：AI 工具本体、登录凭据、shell 历史、npm 全局包都在里面，`down` 或 `rebuild` 后都还在。
 - 环境检测报告（`aibox report`）：查询出口 IP 信息（ipinfo.io、proxycheck.io、ip-api.com、StopForumSpam）的请求都在 workspace 里经代理发出，这些服务只看到出口 IP；只有"本机"一节（真实 IPv4 / IPv6、本机 DNS）从宿主机直连查询。
 - 构建时设置 `BUILDX_NO_DEFAULT_ATTESTATIONS=1`：provenance 证明带有构建时间，会让镜像 ID 每次都变，导致每次 `up` 都重建容器、中断 tmux 会话。
-- AI 工具不打进镜像，也不预装：第一次使用时经网关安装到 home 卷。
+- AI 工具不打进镜像，也不预装：第一次使用时经网关安装到 home 卷。安装入口是 `/usr/local/bin` 下的同名脚本（排在 PATH 最后），装好后用 `exec` 替换成真正的程序，所以工具始终是 shell 的直接前台任务（不在子 shell 里运行，Ctrl+C 和作业控制都正常）。
 - 时区和语言跟随出口 IP 的地区：`aibox up` 在 workspace 里经隧道查询 ipinfo.io（备用 ip-api.com），生成对应 locale，写入 `~/.config/aibox/locale.env`，由登录 shell 和 `aibox` 的 `docker exec -e` 生效。不写进容器环境变量，地区变化时不需要重建容器（不会中断 tmux 会话）。
 - apt 安装的包写进 `AIBOX_EXTRA_PACKAGES`，执行 `rebuild` 后会固化到镜像里。
 

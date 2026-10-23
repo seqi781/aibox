@@ -318,3 +318,65 @@ table.cmp { width: 100%; border-collapse: collapse; min-width: 640px; font-size:
   .term pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 }
 html[lang="en"] .hero h1 { font-size: clamp(32px, 3.4vw, 50px); }
+
+/* ---------- 终端录制回放（init/） ---------- */
+.cast-page { border-top: 0; padding-top: calc(var(--header) + clamp(40px, 6vw, 72px)); }
+.cast-meta { display: flex; flex-wrap: wrap; gap: 10px 32px; margin: 28px 0 0; font-family: var(--font-mono); font-size: 12px; }
+.cast-meta div { min-width: 0; }
+.cast-meta dt { color: var(--mut); letter-spacing: .08em; }
+.cast-meta dd { margin: 2px 0 0; color: var(--tx); }
+.cast { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; margin-top: 40px; align-items: start; }
+@media (max-width: 1100px) { .cast { grid-template-columns: minmax(0, 1fr); } }
+.cast-term { margin: 0; }
+.cast-view { height: min(660px, 72vh); overflow: auto; padding: 16px 18px; background: var(--bg); overscroll-behavior: contain; }
+.cast-view:focus-visible { outline: 1px solid var(--acc); outline-offset: -1px; }
+.cast-screen { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; color: var(--tx2); white-space: pre; width: max-content; min-width: 100%; font-variant-numeric: tabular-nums; }
+.cast-screen .ln { min-height: 1.6em; }
+.cast-screen .cur { background: var(--tx); color: var(--bg); }
+.cast.playing .cast-screen .cur { animation: blink 1s steps(1) infinite; }
+.cast-nojs { margin: 0; color: var(--mut); font-family: var(--font-mono); font-size: 12.5px; }
+.cast-ctl { justify-content: flex-start; flex-wrap: nowrap; }
+.cast-ctl .mini { flex: none; min-width: 4.2em; }
+.cast-bar { flex: 1 1 auto; min-width: 60px; height: 18px; position: relative; cursor: pointer; }
+.cast-bar::before { content: ""; position: absolute; left: 0; right: 0; top: 8px; height: 1px; background: var(--line); }
+.cast-bar i { position: absolute; left: 0; top: 7px; height: 3px; background: var(--acc); width: 0; }
+.cast-bar:focus-visible { outline: 1px solid var(--acc); outline-offset: 2px; }
+.cast-time { flex: none; white-space: nowrap; }
+@media (max-width: 560px) { .cast-ctl { flex-wrap: wrap; } .cast-bar { flex-basis: 100%; order: 3; } }
+.cast-side h2 { font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; font-weight: 400; color: var(--mut); margin: 0 0 12px; text-transform: uppercase; }
+.cast-side h2 + * { margin-bottom: 36px; }
+.cast-chapters { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.cast-chapters li { border-bottom: 1px solid var(--line); }
+.cast-chapters button { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 3.6em minmax(0, 1fr); width: 100%; padding: 10px 0; cursor: pointer; font-size: 14px; color: var(--tx2); transition: color var(--hover); }
+.cast-chapters button span { font-family: var(--font-mono); font-size: 12px; color: var(--mut); padding-top: 2px; }
+.cast-chapters button:hover { color: var(--tx); }
+.cast-chapters button:focus-visible { outline: 1px solid var(--acc); outline-offset: 2px; }
+.cast-side .ticks li { font-size: 14px; }
+.cast-back { margin: 0; }
+
+/* ANSI 颜色：映射到站点色板，深浅两种主题都可读 */
+.a-f0, .a-f8 { color: var(--mut); }
+.a-f1, .a-f9 { color: var(--bad); }
+.a-f2, .a-f10 { color: var(--acc); }
+.a-f3, .a-f11 { color: var(--warn); }
+.a-f4, .a-f12, .a-f6, .a-f14 { color: var(--acc); }
+.a-f5, .a-f13 { color: var(--tx2); }
+.a-f7, .a-f15 { color: var(--tx); }
+.a-g0, .a-g8 { background: var(--bg3); }
+.a-g1, .a-g9 { background: var(--bad); color: var(--bg); }
+.a-g2, .a-g10, .a-g4, .a-g12, .a-g6, .a-g14 { background: var(--acc); color: var(--bg); }
+.a-g3, .a-g11 { background: var(--warn); color: var(--bg); }
+.a-g5, .a-g13, .a-g7, .a-g15 { background: var(--bg3); }
+.a-b { font-weight: 700; color: var(--tx); }
+.a-b.a-f1, .a-b.a-f9 { color: var(--bad); }
+.a-b.a-f2, .a-b.a-f10, .a-b.a-f4, .a-b.a-f6 { color: var(--acc); }
+.a-b.a-f3, .a-b.a-f11 { color: var(--warn); }
+.a-d { color: var(--mut); }
+.a-i { font-style: italic; }
+.a-u { text-decoration: underline; }
+
+/* 首页“上手”里指向录制页的链接 */
+.rec-link { display: inline-flex; gap: 10px; align-items: baseline; margin-top: 14px; font-family: var(--font-mono); font-size: 12.5px; color: var(--acc); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color var(--hover); }
+.rec-link:hover { border-bottom-color: var(--acc); }
+.sub-h { font-size: 17px; font-weight: 700; margin: 36px 0 0; padding-top: 22px; border-top: 1px solid var(--line); }
+.sub-h + .note { margin-top: 10px; }

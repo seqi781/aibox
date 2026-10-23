@@ -23,6 +23,8 @@ images/
     Dockerfile
     rootfs/usr/local/bin/aibox-entrypoint   修正 home 卷归属
     rootfs/usr/local/bin/aibox-setup        安装 claude / codex / gemini / opencode（第一次使用时调用）
+    rootfs/usr/local/lib/aibox/tool-shim    /usr/local/bin/{claude,codex,...} 指向它：首次运行时安装，然后 exec 成真正的程序
+    rootfs/etc/aibox/prompt.sh              [aibox] 提示符（~/.bashrc 末尾也会加载，避免被覆盖）
     rootfs/etc/profile.d/aibox-locale.sh    按出口地区设置时区和语言（读取 ~/.config/aibox/locale.env）
     rootfs/etc/aibox/bashrc                 提示符、欢迎信息
     rootfs/etc/profile.d/aibox-path.sh      登录 shell 的 PATH（/etc/profile 会重置）
@@ -67,7 +69,7 @@ docker compose -f compose.yaml -f gateways/<网关>.yaml -f .aibox/compose.gener
   │
 fix_netns（网关重启过则重启 workspace，重新加入网络命名空间）
 geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.config/aibox/locale.env）
-（AI 工具不在这里安装：cmd_agent 和容器内的 command_not_found_handle 在第一次使用时安装）
+（AI 工具不在这里安装：容器里 /usr/local/bin/claude 等同名脚本（tool-shim）在第一次运行时安装，然后 exec 成真正的程序）
 ```
 
 ## 3. `aibox` 脚本的结构
@@ -83,6 +85,7 @@ geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.con
 | 授权目录 | `canon_host_path` `mount_guard` `parse_mount_line` `gen_override` `mounts_add` `mounts_rm` | `mount_guard` 是挂载黑名单 |
 | 容器状态 | `is_running` `health` `dexec` `fix_netns` | `TTY_FLAG` 必须在顶层判断 |
 | 向导提问 | `ask` `ask_path` `ask_secret` `yesno` `choose` | |
+| 进度显示 | `run_step` `step_detail` `fmt_secs` | 长操作在后台运行，前台显示已用时间、预计时间和当前步骤；日志在 `.aibox/logs/` |
 | **一键导入出口** | `classify_proxy_input` `probe_subscription` `import_proxy` `write_import_upstream` `show_probe_names` | 识别订阅 / 分享链接 / 一键导入链接 / Base64 / YAML，预先下载订阅检查，再写入 upstream.yaml 和 links.txt |
 | **写配置的共用函数** | `write_sub_upstream` `write_nodes_upstream` `install_wireguard` `write_provider_vpn` `check_wg_endpoint` `check_ports` | 向导和非交互命令共用；失败时恢复原文件 |
 | 出口测试与地区 | `proxy_test` `geo_query` `geo_apply` `geo_args` `country_locale` `cmd_test` `snap_save/restore` | 用临时网关容器 aibox-gwtest 测节点，不影响正在运行的环境；失败时恢复配置 |

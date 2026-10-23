@@ -28,15 +28,3 @@ if [ -z "${AIBOX_WELCOMED:-}" ]; then
     echo "  时区 $(sed -n 's/^TZ=//p' "$HOME/.config/aibox/locale.env") · 语言 $(sed -n 's/^LANG=//p' "$HOME/.config/aibox/locale.env")（按出口 IP 地区自动设置）"
   fi
 fi
-
-# 第一次输入 claude / codex 等命令时自动安装（之后保存在持久化 home 中）
-command_not_found_handle() {
-  case "$1" in
-    claude|codex|gemini|opencode)
-      echo "首次使用 ${1}，正在安装…" >&2
-      aibox-setup "$1" >&2 && hash -r && "$@"
-      return $? ;;
-  esac
-  printf 'bash: %s: command not found\n' "$1" >&2
-  return 127
-}

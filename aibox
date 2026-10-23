@@ -195,6 +195,58 @@ load_env() {
   fi
 }
 
+# ---------- 进度显示：长时间操作在后台运行，前台显示已用时间、预计时间和当前进度 ----------
+LOG_DIR="$ROOT/.aibox/logs"
+fmt_secs() { if [ "$1" -ge 60 ]; then printf '%d 分 %02d 秒' $(($1 / 60)) $(($1 % 60)); else printf '%d 秒' "$1"; fi; }
+
+# 从构建日志中取出当前步骤，例如 "workspace 5/9"
+step_detail() {
+  [ -f "$1" ] || return 0
+  local st n
+  st="$(grep -oE '\[[a-z-]+ +[0-9]+/[0-9]+\]' "$1" 2>/dev/null | tail -1 | tr -d '[]' | tr -s ' ')"
+  # 安装系统软件包这一步最久：显示下载 / 安装的数量，让用户看到它在动
+  n="$(grep -c 'Setting up ' "$1" 2>/dev/null || true)"
+  if [ "${n:-0}" -gt 0 ]; then st="$st · 已安装 $n 个软件包"
+  else n="$(grep -cE 'Get:[0-9]+ ' "$1" 2>/dev/null || true)"; [ "${n:-0}" -gt 0 ] && st="$st · 已下载 $n 个软件包"; fi
+  # 最后把镜像写入 Docker（约 1 分钟，期间没有其它输出）
+  case "$(grep -E 'exporting|unpacking' "$1" 2>/dev/null | tail -1)" in
+    *'exporting layers'*done*|*unpacking*done*) ;;
+    *exporting*) st="正在保存镜像（约 1 分钟）" ;;
+    *unpacking*) st="正在解压镜像" ;;
+  esac
+  printf '%s' "$st"
+}
+
+# run_step 说明 预计时间 日志文件 命令...   成功返回 0；失败时显示日志最后几行
+run_step() {
+  local msg="$1" est="$2" log="$3" pid st=0 start=$SECONDS i=0 d frames='-\|/'
+  shift 3
+  mkdir -p "$(dirname "$log")"; : > "$log"
+  "$@" > "$log" 2>&1 &
+  pid=$!
+  trap 'kill "$pid" 2>/dev/null; printf "\n"; exit 130' INT TERM
+  if [ -t 1 ]; then
+    while kill -0 "$pid" 2>/dev/null; do
+      d="$(step_detail "$log")"
+      printf '\r\033[K  %s %s  %s已用 %s%s%s%s' "${frames:$((i % 4)):1}" "$msg" "$D" "$(fmt_secs $((SECONDS - start)))" \
+        "${est:+ · $est}" "${d:+ · $d}" "$N"
+      i=$((i + 1)); sleep 0.5
+    done
+    printf '\r\033[K'
+  else
+    echo "  … ${msg}${est:+（${est}）}"
+  fi
+  wait "$pid" || st=$?
+  trap - INT TERM
+  if [ "$st" = 0 ]; then
+    echo "  ${G}✔${N} ${msg}  ${D}$(fmt_secs $((SECONDS - start)))${N}"
+  else
+    echo "  ${R}✘${N} ${msg}  ${D}$(fmt_secs $((SECONDS - start)))，完整日志: ${log#"$ROOT"/}${N}"
+    grep -v '^[[:space:]]*$' "$log" | tail -12 | sed 's/^/      /'
+  fi
+  return "$st"
+}
+
 # 构建时不附带 provenance 证明：它带有构建时间，会让镜像 ID 每次都变，导致每次 up 都重建容器（中断 tmux 会话）
 export BUILDX_NO_DEFAULT_ATTESTATIONS=1
 
@@ -684,7 +736,11 @@ geo_args() {
 # aibox up 后：检测出口地区，设置 workspace 的时区和语言
 geo_apply() {
   local tz lang
-  if geo_query "$WS"; then geo_save
+  local found=0
+  [ -t 1 ] && printf '  %s检测出口地区，设置时区和语言…%s' "$D" "$N"
+  geo_query "$WS" && found=1
+  [ -t 1 ] && printf '\r\033[K'
+  if [ "$found" = 1 ]; then geo_save
   elif geo_load; then warn "暂时查不到出口 IP 的地区，沿用上次的结果（$(geo_where)）"
   else warn "查不到出口 IP 的地区，时区和语言保持 UTC / C.UTF-8"; fi
   tz="$(geo_tz)"; lang="$(geo_lang)"
@@ -700,10 +756,10 @@ geo_apply() {
 # 不影响正在运行的 aibox（独立容器，测完即删）。至少一个节点可用时返回 0
 proxy_test() {
   local i=0 all delays alive=0 total=0 item rest name ms list="" dead="" deadn=0 now
-  if docker image inspect aibox/gateway-mihomo:latest >/dev/null 2>&1; then echo "  正在测试节点…"
-  else echo "  正在测试节点…（第一次需要构建网关镜像，约 1 分钟）"; fi
-  docker build -q -t aibox/gateway-mihomo:latest --build-arg MIHOMO_VERSION="${AIBOX_MIHOMO_VERSION:-v1.19.33}" \
-    "$ROOT/images/mihomo-gateway" >/dev/null || { echo "  网关镜像构建失败" >&2; return 1; }
+  local est="通常几秒"
+  docker image inspect aibox/gateway-mihomo:latest >/dev/null 2>&1 || est="第一次构建，约 1 分钟"
+  run_step "准备测试网关" "$est" "$LOG_DIR/gwtest-build.log" docker build --progress plain -t aibox/gateway-mihomo:latest \
+    --build-arg MIHOMO_VERSION="${AIBOX_MIHOMO_VERSION:-v1.19.33}" "$ROOT/images/mihomo-gateway" || return 1
   docker rm -f "$GW_TEST" >/dev/null 2>&1 || true
   local vol="$CONF/mihomo:/config:ro"; [ "${AIBOX_SELINUX_RELABEL:-}" = 1 ] && vol="$vol,z"
   docker run -d --name "$GW_TEST" --cap-add NET_ADMIN --device /dev/net/tun \
@@ -714,9 +770,12 @@ proxy_test() {
     -e TEST_URL="${AIBOX_TEST_URL:-https://www.gstatic.com/generate_204}" \
     -v "$vol" aibox/gateway-mihomo:latest >/dev/null || { echo "  无法启动测试容器" >&2; return 1; }
   # 等待 mihomo 启动并下载订阅（最多约 30 秒）
+  local t0=$SECONDS
   while :; do
     i=$((i + 1))
+    [ -t 1 ] && printf '\r\033[K  %s 下载订阅并启动节点  %s已用 %s · 通常 5-30 秒%s' "$([ $((i % 2)) = 0 ] && echo '-' || echo '|')" "$D" "$(fmt_secs $((SECONDS - t0)))" "$N"
     if ! is_running "$GW_TEST"; then
+      [ -t 1 ] && printf '\r\033[K'
       echo "  测试网关启动失败：" >&2; docker logs --tail 8 "$GW_TEST" 2>&1 | sed 's/^/    /' >&2
       docker rm -f "$GW_TEST" >/dev/null 2>&1; return 1
     fi
@@ -725,6 +784,8 @@ proxy_test() {
     case "$all" in ''|'"REJECT"') [ "$i" -lt 15 ] && { sleep 2; continue; } ;; esac
     break
   done
+  [ -t 1 ] && printf '\r\033[K'
+  [ -t 1 ] && printf '  %s正在测速（最多 20 秒）…%s' "$D" "$N"
   if [ -z "$all" ] || [ "$all" = '"REJECT"' ]; then
     echo "  ${R}✘${N} 没有可用节点：订阅下载失败，或节点筛选没有匹配到任何节点" >&2
     docker logs "$GW_TEST" 2>&1 | grep -iE 'error|fail' | tail -3 | sed 's/^/    /' >&2
@@ -733,6 +794,7 @@ proxy_test() {
   # 所有节点测延迟（只返回可用的节点）
   delays="$(docker exec "$GW_TEST" curl -fsS --max-time 20 --unix-socket /run/aibox/mihomo.sock \
     "http://mihomo/group/PROXY/delay?url=$(printf '%s' "${AIBOX_TEST_URL:-https://www.gstatic.com/generate_204}" | sed 's/:/%3A/g; s#/#%2F#g')&timeout=5000" 2>/dev/null || true)"
+  [ -t 1 ] && printf '\r\033[K'
   rest="${delays#\{}"; rest="${rest%\}}"
   while [ -n "$rest" ]; do
     item="${rest%%,\"*}"; if [ "$item" = "$rest" ]; then rest=""; else rest="${rest#*,\"}"; fi
@@ -1143,10 +1205,15 @@ cmd_up() {
     warn "SELinux 为 Enforcing，挂载目录可能无法访问；运行 aibox config set AIBOX_SELINUX_RELABEL 1"
   fi
   info "启动 aibox（网关: ${AIBOX_GATEWAY}）"
-  # 每次都检查构建（有缓存时很快），确保 aibox 更新后网关的安全规则立即生效
-  local build=(--build)
-  docker compose up --help 2>/dev/null | grep -q -- --quiet-build && build=(--build --quiet-build)
-  if ! compose up -d "${build[@]}" --wait --wait-timeout "${AIBOX_WAIT_TIMEOUT:-180}" "$@"; then
+  # 每次都检查构建（有缓存时几秒钟），确保 aibox 更新后网关的安全规则立即生效
+  local est="检查更新，通常几秒" up_est="通常 10-30 秒"
+  docker image inspect aibox/workspace:latest >/dev/null 2>&1 || est="第一次构建，约 3-5 分钟"
+  [ "$AIBOX_GATEWAY" = gluetun ] && ! docker image inspect "qmcgaw/gluetun:${AIBOX_GLUETUN_VERSION:-v3.41.3}" >/dev/null 2>&1 \
+    && up_est="第一次需要下载 VPN 镜像，约 1 分钟"
+  run_step "构建镜像" "$est" "$LOG_DIR/build.log" compose --progress plain build \
+    || die "镜像构建失败。构建用的是你电脑本身的网络，请检查网络后重试（日志: .aibox/logs/build.log）"
+  if ! run_step "启动网关并连接节点" "$up_est" "$LOG_DIR/up.log" \
+      compose up -d --wait --wait-timeout "${AIBOX_WAIT_TIMEOUT:-180}" "$@"; then
     echo; warn "启动失败，网关日志："
     docker logs --tail 30 "$GW" 2>&1 | sed 's/^/    /' || true
     local priv
@@ -1242,11 +1309,7 @@ cmd_agent() {
       *) args+=("$1") ;;
     esac; shift
   done
-  ensure_up
-  if ! docker exec "$WS" bash -lc "command -v $tool" >/dev/null 2>&1; then
-    info "第一次使用 ${tool}，正在安装（经网关下载，之后保存在持久化 home 中）"
-    docker exec $TTY_FLAG "$WS" aibox-setup "$tool" || die "$tool 安装失败。检查网络: aibox doctor；重试: aibox setup $tool"
-  fi
+  ensure_up   # 工具没装时，容器里的同名脚本会先安装再运行
   if [ "$yolo" = 1 ]; then   # 容器即沙箱：跳过工具自身的逐条确认
     case "$tool" in
       claude) args=(--dangerously-skip-permissions ${args[@]+"${args[@]}"}) ;;
@@ -1592,6 +1655,19 @@ host_dns_resolver() {
   printf '%s' "$t"
 }
 
+# 本机（直连）网络信息，输出 KEY=VALUE
+report_host_collect() {
+  local hj ip dns
+  hj="$(curl -4 -fsS --max-time 8 https://ipinfo.io/json 2>/dev/null || true)"
+  ip="$(jf ip "$hj")"; [ -n "$ip" ] || ip="$(curl -4 -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
+  echo "H_IP=$ip"; echo "H_ORG=$(jf org "$hj")"; echo "H_CC=$(jf country "$hj")"; echo "H_CITY=$(jf city "$hj")"
+  echo "H_V6=$(curl -6 -fsS --max-time 5 https://api6.ipify.org 2>/dev/null || true)"
+  echo "H_TZ=$(host_tz)"
+  dns="$(host_dns_resolver)"; echo "H_DNS=$dns"
+  [ -n "$dns" ] && echo "H_DNS_ORG=$(jf org "$(curl -fsS --max-time 6 "https://ipinfo.io/$dns/json" 2>/dev/null || true)")"
+  return 0
+}
+
 # 可能不在主流 AI 服务支持范围内的地区（以各服务商公布的列表为准）
 ai_unsupported_region() { case "$1" in CN|HK|MO|RU|BY|IR|KP|SY|CU) return 0 ;; esac; return 1; }
 
@@ -1605,20 +1681,23 @@ cmd_report() {
     printf -v "R_$v" '%s' ""
   done
   echo "${B}环境检测报告${N}  ${D}（出口相关的查询都经代理发出）${N}"
-  echo "  正在检测…"
 
-  # ---- 本机（直连）----
-  local hj h_ip h_org h_cc h_city h_v6 h_tz h_dns h_dns_org=""
-  hj="$(curl -4 -fsS --max-time 8 https://ipinfo.io/json 2>/dev/null || true)"
-  h_ip="$(jf ip "$hj")"; h_org="$(jf org "$hj")"; h_cc="$(jf country "$hj")"; h_city="$(jf city "$hj")"
-  [ -n "$h_ip" ] || h_ip="$(curl -4 -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
-  h_v6="$(curl -6 -fsS --max-time 5 https://api6.ipify.org 2>/dev/null || true)"
-  h_tz="$(host_tz)"; h_dns="$(host_dns_resolver)"
-  [ -n "$h_dns" ] && h_dns_org="$(jf org "$(curl -fsS --max-time 6 "https://ipinfo.io/$h_dns/json" 2>/dev/null || true)")"
-
-  # ---- 出口（经代理）----
-  report_parse < <(docker exec "$WS" bash -c "$REPORT_COLLECT" 2>/dev/null)
-  local doc_ok=1; ( cmd_doctor ) >/dev/null 2>&1 || doc_ok=0
+  # ---- 三项检测并行运行：本机（直连）、出口（经代理）、网络隔离体检 ----
+  local hf="$LOG_DIR/report-host.txt" xf="$LOG_DIR/report-exit.txt" df="$LOG_DIR/report-doctor.txt" doc_ok=1
+  mkdir -p "$LOG_DIR"
+  report_host_collect > "$hf" 2>/dev/null &
+  local hp=$!
+  ( cmd_doctor ) > "$df" 2>&1 &
+  local dp=$!
+  run_step "检测本机与出口 IP、IP 风险、DNS" "约 15 秒" "$xf" docker exec "$WS" bash -c "$REPORT_COLLECT" || true
+  wait "$hp" || true
+  [ -t 1 ] && printf '  %s等待网络隔离体检…%s' "$D" "$N"
+  wait "$dp" || doc_ok=0
+  [ -t 1 ] && printf '\r\033[K'
+  report_parse < "$xf"
+  local h_ip h_org h_cc h_city h_v6 h_tz h_dns h_dns_org
+  h_ip="$(get_kv "$hf" H_IP)"; h_org="$(get_kv "$hf" H_ORG)"; h_cc="$(get_kv "$hf" H_CC)"; h_city="$(get_kv "$hf" H_CITY)"
+  h_v6="$(get_kv "$hf" H_V6)"; h_tz="$(get_kv "$hf" H_TZ)"; h_dns="$(get_kv "$hf" H_DNS)"; h_dns_org="$(get_kv "$hf" H_DNS_ORG)"
 
   # ---- 判定 ----
   local high="" mid="" note="" type="未知" asn_x="" asn_h="" asn_d=""

@@ -361,11 +361,12 @@
           <span class="n">[2]</span>
           <div>
             <h3>获取 aibox，运行配置向导</h3>
-            <p>向导只问两件事：出口（粘贴订阅或分享链接，自动识别并当场测试）和授权目录，回车即采用默认值。最后可以安装 <code>aibox</code> / <code>ai</code> 命令和 Tab 补全，直接启动并体检。</p>
+            <p>向导只问两件事：出口（粘贴订阅或分享链接，自动识别并当场测试）和授权目录，回车即采用默认值。最后可以安装 <code>aibox</code> / <code>ai</code> 命令和 Tab 补全，直接启动，并输出一份环境检测报告。</p>
             <div class="code"><div class="code-bar"><span>bash</span><button class="mini copy" type="button" data-target="c-init">复制</button></div>
 <pre id="c-init">git clone https://github.com/OWNER/aibox ~/aibox
 cd ~/aibox
 ./aibox init</pre></div>
+            <a class="rec-link" href="init/"><span aria-hidden="true">[&gt;]</span>看一段真实录制的 ./aibox init</a>
           </div>
         </li>
         <li>
@@ -444,6 +445,7 @@ printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
 <span class="hd">出口</span>
   <span class="ok">✔</span> 容器出口: 203.0.113.24 JP AS64500 Example
     宿主机出口: 198.51.100.7
+    地区: JP Tokyo → 时区 Asia/Tokyo，语言 ja_JP.UTF-8
 <span class="hd">IPv6</span>
   <span class="ok">✔</span> IPv6 出网被阻断
   <span class="ok">✔</span> 无全局 IPv6 地址
@@ -479,6 +481,9 @@ printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
         </ul>
         <div class="cli below"><pre id="c-doctor">aibox doctor --full</pre><button class="copy" type="button" data-target="c-doctor">复制</button></div>
         <p class="note"><span class="lbl">NOTE</span>上面的检查项以 mihomo 网关为例；使用 gluetun 时，DNS 和隔离部分的项目会少一些，断线测试改为拉下 VPN 网卡。</p>
+        <h3 class="sub-h">环境检测报告</h3>
+        <p class="note"><code>aibox report</code> 从外部视角看出口：本机和容器各自的出口 IP、地区和运营商；出口 IP 是机房、住宅还是移动网络，在公开风险库里的评分和滥用记录；容器的 DNS 有没有经本机运营商解析、有没有带上本机网段；容器的时区和语言是否与出口地区一致。最后汇总成高 / 中 / 低三档结论。<code>init</code> 启动完成后会自动运行一次。这些查询会访问 ipinfo.io、proxycheck.io、ip-api.com 等第三方服务，出口相关的查询都经代理发出。</p>
+        <div class="cli below"><pre id="c-report">aibox report</pre><button class="copy" type="button" data-target="c-report">复制</button></div>
       </div>
     </div>
   </div>

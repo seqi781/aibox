@@ -343,11 +343,12 @@
           <span class="n">[2]</span>
           <div>
             <h3>Get aibox and run the wizard</h3>
-            <p>It asks only two things: egress (paste a subscription or share links; the format is detected and tested on the spot) and granted folders. Press Enter to accept defaults. At the end it can install the <code>aibox</code> / <code>ai</code> commands with Tab completion, start everything and run the checks.</p>
+            <p>It asks only two things: egress (paste a subscription or share links; the format is detected and tested on the spot) and granted folders. Press Enter to accept defaults. At the end it can install the <code>aibox</code> / <code>ai</code> commands with Tab completion, start everything and print an environment report.</p>
             <div class="code"><div class="code-bar"><span>bash</span><button class="mini copy" type="button" data-target="c-init">Copy</button></div>
 <pre id="c-init">git clone https://github.com/OWNER/aibox ~/aibox
 cd ~/aibox
 ./aibox init</pre></div>
+            <a class="rec-link" href="../init/" hreflang="zh-CN"><span aria-hidden="true">[&gt;]</span>Watch a real recording of ./aibox init (CLI output in Chinese)</a>
           </div>
         </li>
         <li>
@@ -424,6 +425,7 @@ printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
 <span class="hd">出口</span>  <span class="d">egress</span>
   <span class="ok">✔</span> 容器出口: 203.0.113.24 JP AS64500 Example
     宿主机出口: 198.51.100.7
+    地区: JP Tokyo → 时区 Asia/Tokyo，语言 ja_JP.UTF-8
 <span class="hd">IPv6</span>
   <span class="ok">✔</span> IPv6 出网被阻断
   <span class="ok">✔</span> 无全局 IPv6 地址
@@ -459,6 +461,9 @@ printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
         </ul>
         <div class="cli below"><pre id="c-doctor">aibox doctor --full</pre><button class="copy" type="button" data-target="c-doctor">Copy</button></div>
         <p class="note"><span class="lbl">NOTE</span>The list above uses the mihomo gateway. With gluetun there are fewer DNS and isolation checks, and the disconnect test downs the VPN interface instead.</p>
+        <h3 class="sub-h">Environment report</h3>
+        <p class="note"><code>aibox report</code> looks at the egress from the outside: the host's and the container's public IP, region and ISP; whether the egress IP is datacenter, residential or mobile, plus its score and abuse records in public risk databases; whether the container's DNS goes through your local ISP or carries your local subnet; and whether the container's time zone and language match the egress region. It sums this up as high / medium / low. <code>init</code> runs it once after startup. These lookups contact third-party services such as ipinfo.io, proxycheck.io and ip-api.com; the egress lookups go through the proxy.</p>
+        <div class="cli below"><pre id="c-report">aibox report</pre><button class="copy" type="button" data-target="c-report">Copy</button></div>
       </div>
     </div>
   </div>

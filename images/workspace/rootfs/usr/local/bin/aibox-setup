@@ -6,15 +6,17 @@
 # 通常不需要手动运行：第一次执行 aibox claude / codex，或在容器里输入 claude / codex 时会自动安装
 set -uo pipefail
 ALL="claude codex gemini opencode"
+# 已安装 = PATH 中有真正的程序（/usr/local/bin 下的同名脚本只是首次运行时的安装入口）
+installed() { local p; p="$(command -v "$1" 2>/dev/null)" && [ "$(readlink -f "$p")" != /usr/local/lib/aibox/tool-shim ]; }
 UPGRADE=0; TOOLS=""
 for a in "$@"; do case "$a" in --upgrade) UPGRADE=1 ;; *) TOOLS="$TOOLS $a" ;; esac; done
 if [ -z "$TOOLS" ]; then
   [ "$UPGRADE" = 1 ] || { echo "用法: aibox-setup <$(echo $ALL | tr ' ' '|')>... [--upgrade]"; exit 1; }
-  for t in $ALL; do command -v "$t" >/dev/null 2>&1 && TOOLS="$TOOLS $t"; done
+  for t in $ALL; do installed "$t" && TOOLS="$TOOLS $t"; done
   [ -n "$TOOLS" ] || { echo "还没有安装任何 AI 工具"; exit 0; }
 fi
 rc=0
-need() { [ "$UPGRADE" = 1 ] || ! command -v "$1" >/dev/null 2>&1; }
+need() { [ "$UPGRADE" = 1 ] || ! installed "$1"; }
 
 for t in $TOOLS; do
   case "$t" in
@@ -34,6 +36,6 @@ for t in $TOOLS; do
 done
 hash -r
 for t in $TOOLS; do
-  command -v "$t" >/dev/null 2>&1 && printf '  %-9s %s\n' "$t" "$("$t" --version 2>/dev/null | head -1)"
+  installed "$t" && printf '  %-9s %s\n' "$t" "$("$t" --version 2>/dev/null | head -1)"
 done
 exit "$rc"
