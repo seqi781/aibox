@@ -35,8 +35,8 @@ if [ "$QUICK" = 0 ]; then
     echo "== 构建测试镜像 $img"
     docker build -q --build-arg BASH_TAG="$v" -t "$img" tests/ >/dev/null || { results="$results  ✘ 构建 $img
 "; fail=1; continue; }
-    step "bash $v：非交互命令" docker run --rm -v "$PWD":/src:ro "$img" bash /src/tests/cli.sh
-    step "bash $v：交互式流程" docker run --rm -v "$PWD":/src:ro "$img" python3 /src/tests/interactive.py
+    step "bash ${v}：非交互命令" docker run --rm -v "$PWD":/src:ro "$img" bash /src/tests/cli.sh
+    step "bash ${v}：交互式流程" docker run --rm -v "$PWD":/src:ro "$img" python3 /src/tests/interactive.py
   done
 fi
 

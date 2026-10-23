@@ -8,7 +8,7 @@ cp -r /src "$W/repo"; rm -rf "$W/repo/config" "$W/repo/.aibox"
 cd "$W/repo"
 export HOME="$W/home"
 V=images/mihomo-gateway/validate-upstream.sh
-echo "非交互命令（bash $BASH_VERSION）"
+echo "非交互命令（bash ${BASH_VERSION}）"
 
 n=0; bad=0
 run() {  # run 期望返回码(0|1) 命令...
@@ -17,7 +17,7 @@ run() {  # run 期望返回码(0|1) 命令...
   if printf '%s' "$out" | grep -qiE 'unbound variable|syntax error|bad substitution|command not found|not a valid identifier|invalid option|line [0-9]+:'; then
     bad=$((bad + 1)); echo "  ✘ [$*] 解释器错误:"; printf '%s\n' "$out" | sed 's/^/      /' | head -5
   elif { [ "$want" = 0 ] && [ "$rc" -ne 0 ]; } || { [ "$want" = 1 ] && [ "$rc" -eq 0 ]; }; then
-    bad=$((bad + 1)); echo "  ✘ [$*] 返回码 $rc（期望 $want）:"; printf '%s\n' "$out" | sed 's/^/      /' | head -3
+    bad=$((bad + 1)); echo "  ✘ [$*] 返回码 ${rc}（期望 ${want}）:"; printf '%s\n' "$out" | sed 's/^/      /' | head -3
   fi
 }
 expect() {  # expect 描述 条件命令...

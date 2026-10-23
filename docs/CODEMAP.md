@@ -42,7 +42,7 @@ docs/
   CODEMAP.md                   本文件
 AGENTS.md / CLAUDE.md          agent 自动读取的操作规则与安全边界
 tests/                         兼容性测试（tests/run.sh；见第 6 节）
-site/                          宣传站（纯静态，与产品代码无关）
+（宣传站已迁出，本仓库只维护终端工具及其文档）
 ```
 
 运行时生成、不进 git 的目录：`config/`（用户配置）、`.aibox/compose.generated.yaml`（挂载与端口）、`.aibox/geo.env`（最近一次检测到的出口地区）。

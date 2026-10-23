@@ -8,7 +8,7 @@ ok()  { echo "  ✔ $*"; }
 bad() { echo "  ✘ $*"; fail=1; }
 
 echo "静态检查"
-HOST_BASH="aibox tests/cli.sh tests/lint.sh tests/run.sh site/nextjs/sync.sh"
+HOST_BASH="aibox tests/cli.sh tests/lint.sh tests/run.sh"
 POSIX_SH="images/mihomo-gateway/entrypoint.sh images/mihomo-gateway/healthcheck.sh images/mihomo-gateway/validate-upstream.sh"
 
 for f in $HOST_BASH; do bash -n "$f" || bad "bash 语法错误: $f"; done
@@ -20,7 +20,7 @@ pat='declare -[Anlu]|local -[An]|mapfile|readarray|\$\{[A-Za-z_]+(,,|\^\^)\}|;;&
 if hits="$(grep -nE "$pat" aibox)"; then bad "使用了 bash 4+ 语法:"; echo "$hits" | sed 's/^/      /'; else ok "没有 bash 4+ 专有语法"; fi
 
 # macOS 的 bash 3.2 在 UTF-8 环境下会把 $var 后面紧跟的中文字节当成变量名的一部分
-hits="$(perl -ne 'print "$ARGV:$.: $_" if /\$[A-Za-z_][A-Za-z0-9_]*[\x80-\xff]/' aibox $POSIX_SH images/workspace/rootfs/usr/local/bin/* 2>/dev/null)"
+hits="$(perl -ne 'print "$ARGV:$.: $_" if /\$[A-Za-z_][A-Za-z0-9_]*[\x80-\xff]/' $HOST_BASH $POSIX_SH images/workspace/rootfs/usr/local/bin/* 2>/dev/null)"
 if [ -n "$hits" ]; then bad "变量后紧跟中文/全角字符（应写成 \${var}）:"; echo "$hits" | sed 's/^/      /'; else ok "没有变量紧跟中文字符"; fi
 
 # 在 $(...) 里判断终端永远为假（stdout 是管道）
