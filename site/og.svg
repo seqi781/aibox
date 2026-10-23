@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0a0a09"/>
+  <rect x="0.5" y="0.5" width="1199" height="629" fill="none" stroke="#2a2925"/>
+  <g transform="translate(80 92)">
+    <rect x="0" y="0" width="30" height="30" rx="3" fill="none" stroke="#ece9e1" stroke-width="3"/>
+    <rect x="8" y="8" width="14" height="14" fill="#7b9dff"/>
+    <text x="48" y="25" font-family="ui-monospace, Menlo, monospace" font-size="30" fill="#ece9e1">aibox</text>
+  </g>
+  <line x1="80" y1="208" x2="112" y2="208" stroke="#7b9dff"/>
+  <text x="126" y="213" font-family="ui-monospace, Menlo, monospace" font-size="16" letter-spacing="3" fill="#8a867d">AI CODING TERMINAL · DOCKER</text>
+  <text font-family="'Noto Serif SC', 'Songti SC', serif" font-weight="900" font-size="76" fill="#ece9e1">
+    <tspan x="80" y="318">给 AI 一台终端，</tspan>
+    <tspan x="80" y="410">边界由你来定。</tspan>
+  </text>
+  <text font-family="'Noto Sans SC', 'PingFang SC', sans-serif" font-size="26" fill="#aaa69c">
+    <tspan x="80" y="490">出口强制走你指定的代理或 VPN，断线就断网；</tspan>
+    <tspan x="80" y="530">只有授权的目录对 AI 可见。</tspan>
+  </text>
+</svg>

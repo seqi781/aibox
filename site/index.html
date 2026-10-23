@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aibox — 在 Docker 里给 AI 编程工具一台隔离终端</title>
+<meta name="description" content="aibox 在 Docker 里运行 Claude Code、Codex 等 AI 编程工具：所有流量强制走你指定的代理节点或 VPN，断线就断网；只有你授权的目录对 AI 可见。支持 macOS 和 Linux。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0a09" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://SITE_DOMAIN/">
+<link rel="alternate" hreflang="zh-CN" href="https://SITE_DOMAIN/">
+<link rel="alternate" hreflang="en" href="https://SITE_DOMAIN/en/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aibox">
+<meta property="og:title" content="aibox — 在 Docker 里给 AI 编程工具一台隔离终端">
+<meta property="og:description" content="出口强制走你指定的代理或 VPN，断线就断网；只有授权的目录对 AI 可见。两个容器，不需要虚拟机。">
+<meta property="og:url" content="https://SITE_DOMAIN/">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+<!-- 导出 og.png（1200×630，源文件 og.svg）后取消下面两行的注释 -->
+<!-- <meta property="og:image" content="https://SITE_DOMAIN/og.png"> -->
+<!-- <meta name="twitter:card" content="summary_large_image"> -->
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="hdr">
+  <div class="shell bar">
+    <a class="logo" href="./" aria-label="aibox 首页"><i aria-hidden="true"></i>aibox</a>
+    <nav class="links" aria-label="页面导航">
+      <a href="#why">为什么</a>
+      <a href="#how">原理</a>
+      <a href="#compare">对比</a>
+      <a href="#start">上手</a>
+      <a href="#agents">给 agent 用</a>
+      <a href="#doctor">体检</a>
+      <a href="#faq">常见问题</a>
+    </nav>
+    <div class="hdr-r">
+      <a class="lang" href="en/" hreflang="en" lang="en">EN</a>
+      <a class="hdr-cta" href="https://github.com/OWNER/aibox">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============ 首屏 ============ -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="shell hero-grid">
+    <div>
+      <p class="eyebrow">AI CODING TERMINAL · DOCKER</p>
+      <h1 id="hero-title">给 AI 一台终端，<br>边界由你来定。</h1>
+      <p class="sub">aibox 在 Docker 里运行 Claude Code、Codex 等 AI 编程工具。<b>所有流量强制走你指定的代理节点或 VPN，断线就断网</b>；<b>只有你授权的目录对 AI 可见</b>。宿主机的网络设置一点不动。</p>
+      <div class="btns">
+        <a class="btn p" href="#start">开始使用</a>
+        <a class="btn g" href="https://github.com/OWNER/aibox">GitHub 仓库</a>
+      </div>
+      <ul class="hero-meta" aria-label="概况">
+        <li>macOS · Linux</li>
+        <li>Windows 可在 WSL2 中使用</li>
+        <li>两个容器，无需虚拟机</li>
+      </ul>
+    </div>
+
+    <figure class="term" style="margin:0">
+      <div class="term-bar">
+        <span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>~/aibox</span>
+        <span class="tag">示意输出 · IP 为文档保留地址</span>
+      </div>
+      <pre id="demo" style="white-space:pre-wrap" aria-label="终端演示：查看状态，在项目 myapp 中启动 Claude Code，离开会话后任务继续运行"><span class="ps">$ </span><span class="cm">ai st</span>
+<span class="d">（docker compose ps 的输出已省略）</span>
+网关: mihomo  健康: <span class="ok">healthy</span>
+出口 IP: 203.0.113.24
+会话:
+  （无）
+<span class="ps">$ </span><span class="cm">ai c myapp</span>
+<span class="ok">==&gt;</span> 在 /workspace/myapp 启动 claude（会话 claude-myapp；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）
+<span class="d">    … Claude Code 在 tmux 会话里工作（界面略）…</span>
+<span class="d">    [按 Ctrl+b d 离开，任务在后台继续]</span>
+<span class="ps">$ </span><span class="cm">ai ls</span>
+claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
+</pre>
+      <figcaption class="term-foot">
+        <span>ai c = aibox claude · ai ls = aibox sessions</span>
+        <button class="mini" type="button" id="demo-replay">重播</button>
+      </figcaption>
+    </figure>
+    <script type="application/json" id="demo-script">[
+      {"cmd": "ai st"},
+      {"out": "（docker compose ps 的输出已省略）", "cls": "d"},
+      {"out": "网关: mihomo  健康: healthy"},
+      {"out": "出口 IP: 203.0.113.24"},
+      {"out": "会话:"},
+      {"out": "  （无）", "wait": 700},
+      {"cmd": "ai c myapp"},
+      {"out": "==> 在 /workspace/myapp 启动 claude（会话 claude-myapp；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）", "wait": 700},
+      {"out": "    … Claude Code 在 tmux 会话里工作（界面略）…", "cls": "d", "wait": 1200},
+      {"out": "    [按 Ctrl+b d 离开，任务在后台继续]", "cls": "d", "wait": 700},
+      {"cmd": "ai ls"},
+      {"out": "claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026"}
+    ]</script>
+  </div>
+</section>
+
+<!-- ============ 痛点 → 解决 ============ -->
+<section class="sec alt" id="why" aria-labelledby="why-title">
+  <div class="shell">
+    <p class="eyebrow">WHY AIBOX</p>
+    <h2 class="h2" id="why-title">把 agent 放进容器，<br>六个顾虑各有答案。</h2>
+    <p class="lede">在自己电脑上让 AI 写代码、跑命令，担心的往往是同几件事。aibox 把每一件都落到了具体的机制上。</p>
+
+    <div class="feats sec-body">
+      <article>
+        <p class="q">01 / FILES</p>
+        <p class="worry"><span>agent 会不会顺手读到 <code>~/.ssh</code>，或者别的项目？</span></p>
+        <h3>只有授权的目录对它可见</h3>
+        <p>在配置里逐个列出目录，每个单独设为只读（ro）或读写（rw），挂到 <code>/workspace</code> 下。ro 由内核强制，容器里的 root 也写不进去。默认拒绝挂载整个主目录、根目录、<code>~/.ssh</code> 等凭据目录、Docker socket，以及 aibox 自己的目录（防止 AI 借此改动网关配置）。</p>
+      </article>
+      <article>
+        <p class="q">02 / COMMANDS</p>
+        <p class="worry"><span>它在终端里跑的命令，会不会改到我的电脑？</span></p>
+        <h3>命令都在容器里执行</h3>
+        <p>Claude Code、Codex 运行在 workspace 容器中，看不到宿主机的进程和其它文件。容器去掉了 NET_ADMIN、NET_RAW、SYS_ADMIN，不挂载 Docker socket，也不开 privileged。</p>
+      </article>
+      <article>
+        <p class="q">03 / EGRESS</p>
+        <p class="worry"><span>分流规则会不会让一部分流量直连？DNS 和 IPv6 呢？</span></p>
+        <h3>只有一个出口，其余默认拒绝</h3>
+        <p>网关防火墙默认拒绝，应用流量只有一条规则：全部走代理。节点筛选没匹配到、订阅下载失败时，网关直接断网，不会回落直连。DNS 在网关本地解析并经隧道转发，程序硬编码 8.8.8.8 也会被拦下；IPv6 直接禁用。</p>
+      </article>
+      <article>
+        <p class="q">04 / KILL SWITCH</p>
+        <p class="worry"><span>代理掉线以后，流量会不会回落到直连？</span></p>
+        <h3>断线就断网，恢复后自动重连</h3>
+        <p>代理进程崩溃或 VPN 断开时，没有隧道就没有出路，流量被阻断，不会回落到直连。mihomo 会被自动拉起，gluetun 自己重连 VPN，工作容器不用重启。</p>
+      </article>
+      <article>
+        <p class="q">05 / HOST NETWORK</p>
+        <p class="worry"><span>我不想为此改动整台电脑的网络设置。</span></p>
+        <h3>宿主机网络保持原样</h3>
+        <p>所有防火墙规则只作用于容器自己的网络命名空间。浏览器、系统代理和其它程序照常走原来的网络，互不干扰。</p>
+      </article>
+      <article>
+        <p class="q">06 / WEIGHT</p>
+        <p class="worry"><span>为了隔离，是不是得开一台完整的虚拟机？</span></p>
+        <h3>两个容器，一台完整的终端</h3>
+        <p>不用额外装虚拟机。里面有 bash、tmux、git、node、python 和编译工具链，不是只能跑几条命令的玩具沙箱；tmux 会话常驻，关掉终端或断开 SSH，任务照样在跑。</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 工作原理 ============ -->
+<section class="sec" id="how" aria-labelledby="how-title">
+  <div class="shell">
+    <p class="eyebrow">HOW IT WORKS</p>
+    <h2 class="h2" id="how-title">流量只有一条路，<br>其余全部拒绝。</h2>
+    <p class="lede">网关容器独占网络栈，workspace 容器没有自己的网卡，和网关共享同一个网络命名空间，只能从网关出去。网络管理权限都在网关里，AI 所在的容器一项也没有。</p>
+
+    <figure class="diagram sec-body">
+      <div class="diagram-scroll">
+        <svg viewBox="0 0 1000 560" role="img" aria-labelledby="arch-t arch-d">
+          <title id="arch-t">aibox 架构图</title>
+          <desc id="arch-d">宿主机上，授权目录以只读或读写方式挂载进 workspace 容器，~/.ssh 等未授权目录不可见。workspace 容器没有网卡，去掉了 NET_ADMIN、NET_RAW、SYS_ADMIN 权限，与 gateway 容器共享网络命名空间，全部流量交给 gateway。gateway 运行 mihomo（TUN）或 gluetun，iptables 默认拒绝，DNS 经隧道解析，IPv6 禁用。流量只能经加密隧道到远程节点或 VPN 服务器，再到互联网。被阻断的路径：绕过隧道直连物理网卡、把宿主机上的 Clash 当作上游、Docker 内置 DNS 127.0.0.11、IPv6 出网。</desc>
+          <defs>
+            <marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ar-a" d="M0 0L10 5L0 10z"/></marker>
+          </defs>
+
+          <!-- 宿主机 -->
+          <rect class="box" x="1" y="24" width="712" height="520"/>
+          <text class="t-m" x="20" y="52">宿主机 · MACOS / LINUX</text>
+          <text class="t-m" x="700" y="52" text-anchor="end">宿主机网络不受影响</text>
+
+          <!-- 授权目录 -->
+          <rect class="box-s" x="20" y="80" width="190" height="150"/>
+          <text class="t-h" x="34" y="106">授权目录</text>
+          <text class="t" x="34" y="136">~/code/myapp  rw</text>
+          <text class="t" x="34" y="160">~/docs/specs  ro</text>
+          <text class="t-w" x="34" y="186">~/.ssh  未授权</text>
+          <text class="t-w" x="34" y="210">~ 或 /  拒绝挂载</text>
+
+          <!-- 本机代理 -->
+          <rect class="box-w" x="20" y="396" width="190" height="84"/>
+          <text class="t-h" x="34" y="424">本机代理软件</text>
+          <text class="t" x="34" y="452">127.0.0.1:7890</text>
+          <text class="t-w" x="20" y="508">× 不能当上游</text>
+
+          <!-- Docker -->
+          <rect class="box" x="230" y="64" width="476" height="464"/>
+          <text class="t-m" x="246" y="88">DOCKER · ORBSTACK / DESKTOP / ENGINE</text>
+          <rect class="box" x="246" y="100" width="444" height="414"/>
+          <text class="t-m" x="262" y="124">共享网络命名空间</text>
+
+          <!-- workspace -->
+          <rect class="box-s" x="262" y="136" width="412" height="150"/>
+          <text class="t-h" x="278" y="162">workspace 容器</text>
+          <text class="t" x="278" y="188">bash · tmux · git · node · python</text>
+          <text class="t" x="278" y="211">claude / codex</text>
+          <text class="t-a" x="278" y="235">无网卡 · 去掉 NET_ADMIN / NET_RAW / SYS_ADMIN</text>
+          <text class="t" x="278" y="262">/workspace/myapp rw · /workspace/specs ro</text>
+
+          <!-- 挂载 -->
+          <path class="ln-a" d="M210 150 C236 150 236 200 258 200" marker-end="url(#ah-a)"/>
+
+          <!-- workspace → gateway -->
+          <path class="ln-a" d="M468 286 L468 322" marker-end="url(#ah-a)"/>
+          <text class="t-a" x="480" y="310">全部流量</text>
+
+          <!-- gateway -->
+          <rect class="box-a" x="262" y="326" width="412" height="150"/>
+          <text class="t-h" x="278" y="352">gateway 容器</text>
+          <text class="t" x="278" y="378">mihomo（TUN）或 gluetun（WireGuard / OpenVPN）</text>
+          <text class="t" x="278" y="402">iptables 默认 DROP，只放行隧道</text>
+          <text class="t" x="278" y="426">DNS → 127.0.0.1，经隧道解析</text>
+          <text class="t" x="278" y="450">IPv6：sysctl 关闭 + ip6tables DROP</text>
+
+          <!-- 命名空间内被阻断 -->
+          <text class="t-w" x="278" y="502">× Docker DNS 127.0.0.11</text>
+          <text class="t-w" x="520" y="502">× IPv6 出网</text>
+
+          <!-- 拒绝：本机代理作为上游 -->
+          <path class="ln-w" d="M262 440 L210 440"/>
+          <path class="x" d="M230 434 L242 446 M242 434 L230 446"/>
+
+          <!-- 隧道 → 远程节点 -->
+          <path class="ln-a" d="M674 372 L776 372" marker-end="url(#ah-a)"/>
+          <text class="t-a" x="724" y="362" style="font-size:12px">加密隧道</text>
+          <rect class="box-a" x="780" y="330" width="200" height="84"/>
+          <text class="t-h" x="880" y="362" text-anchor="middle">远程节点 / VPN</text>
+          <text class="t" x="880" y="390" text-anchor="middle">订阅 · 节点 · WireGuard</text>
+
+          <!-- 远程节点 → 互联网 -->
+          <path class="ln-a" d="M880 330 L880 206" marker-end="url(#ah-a)"/>
+          <rect class="box" x="780" y="136" width="200" height="66"/>
+          <text class="t-h" x="880" y="175" text-anchor="middle">互联网</text>
+
+          <!-- 拒绝：绕过隧道直连 -->
+          <path class="ln-w" d="M674 452 L770 452"/>
+          <path class="x" d="M740 446 L752 458 M752 446 L740 458"/>
+          <text class="t-w" x="780" y="457">× 直连物理网卡</text>
+          <text class="t-w" x="780" y="480">（绕过隧道）</text>
+        </svg>
+      </div>
+      <figcaption>实线：允许的路径 · 虚线和 ×：被阻断的路径<span class="hint"> · 左右滑动查看全图</span></figcaption>
+    </figure>
+
+    <div class="two even below">
+      <ul class="ticks" aria-label="被阻断的路径">
+        <li class="no"><span><b>直连物理网卡</b>：在网关里绕过隧道直接从 eth0 出去，会被防火墙拒绝。</span></li>
+        <li class="no"><span><b>宿主机或局域网代理</b>：网关连接上游的流量只能去公网地址，连不到本机的 Clash。</span></li>
+        <li class="no"><span><b>Docker 内置 DNS</b>：127.0.0.11 可能经宿主机转发，直接封掉，DNS 只走网关本地。</span></li>
+        <li class="no"><span><b>IPv6</b>：sysctl 关闭，ip6tables 全部拒绝；两者都没生效时网关拒绝启动。</span></li>
+      </ul>
+      <ul class="ticks" aria-label="网关说明">
+        <li><span><b>mihomo 网关</b>（Clash Meta 内核）：使用订阅或 Clash 节点，TUN 在三层接管全部流量，不认代理环境变量的程序也逃不出去。</span></li>
+        <li><span><b>gluetun 网关</b>：自建 WireGuard，或 gluetun 支持的商业 VPN（WireGuard / OpenVPN），自带 kill switch。</span></li>
+        <li><span><b>先上防火墙，再启动代理</b>：启动阶段就是默认拒绝。代理的控制接口只在网关内部，agent 切不到直连模式。</span></li>
+        <li class="dash"><span>边界：拉取镜像和 <code>docker build</code> 走宿主机网络，不在运行时隔离的范围内；AI 工具本身在运行时经隧道安装。</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 严格出口策略 ============ -->
+<section class="sec alt" id="strict" aria-labelledby="strict-title">
+  <div class="shell">
+    <p class="eyebrow">STRICT EGRESS</p>
+    <h2 class="h2" id="strict-title">本机的 Clash，<br>不能当上游。</h2>
+    <p class="lede">本地代理软件有自己的分流规则，一部分流量可能按规则直连。如果把它当作上游，出口就不再由 aibox 控制。所以上游必须是远程节点或订阅，你在 Clash 里用的订阅链接，直接填进来就行。</p>
+
+    <div class="two sec-body">
+      <figure class="term" style="margin:0">
+        <div class="term-bar"><span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>配置校验</span><span class="tag">真实报错文本</span></div>
+        <pre><span class="ps">$ </span><span class="cm">aibox config proxy --nodes clash-local.yaml</span>
+<span class="er">upstream 配置错误: 节点 server: 127.0.0.1 指向本机/宿主机/局域网地址。</span>
+  不允许把本地代理软件（如 Mac 上的 Clash）作为上游，请直接填写该软件所用的远程节点或订阅链接。
+<span class="ps">$ </span><span class="cm">echo $?</span>
+1
+<span class="ps">$ </span><span class="cm">aibox config proxy --sub "https://example.com/your-sub"</span>
+已配置代理出口（mihomo）。aibox up 生效</pre>
+      </figure>
+      <ul class="ticks">
+        <li><span><b>第一层，配置校验</b>：节点地址不能是 localhost、<code>*.internal</code>、<code>*.local</code>，也不能是私有或保留网段；不允许 <code>type: direct</code>。</span></li>
+        <li><span><b>第二层，防火墙兜底</b>：订阅里的域名即使解析到宿主机或内网，网关也连不上。</span></li>
+        <li><span><b>失败不留痕</b>：校验不通过时返回非 0，原来的配置保持不变。</span></li>
+        <li class="dash"><span>代价：部署在局域网或 Tailscale（100.64/10）里的节点也会被拒绝，目前没有例外开关。</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 对比 ============ -->
+<section class="sec" id="compare" aria-labelledby="compare-title">
+  <div class="shell">
+    <p class="eyebrow">COMPARISON</p>
+    <h2 class="h2" id="compare-title">和本地代理软件，<br>管的不是同一件事。</h2>
+    <p class="lede">本地代理软件面向整台电脑的日常上网，分流规则正是它的长处。aibox 只管一件事：给 AI agent 一个出口固定、文件受限的工作环境。两者可以同时使用，aibox 不会动你电脑上的代理设置。</p>
+
+    <div class="tbl-wrap sec-body">
+      <table class="cmp">
+        <caption>给 AI 编程工具配网络的两种方式</caption>
+        <thead>
+          <tr><th scope="col">方面</th><th scope="col">在宿主机上直接使用本地代理软件</th><th scope="col">aibox</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">出口是否可控</th>
+            <td data-label="本地代理软件">由分流规则决定，部分流量可能按规则直连；系统代理模式下，不认代理设置的程序会直接走本地网络。</td>
+            <td class="us" data-label="aibox">只有一条“全部走代理”的规则，TUN 或 VPN 在三层接管容器内的全部流量。</td>
+          </tr>
+          <tr>
+            <th scope="row">断线是否阻断</th>
+            <td data-label="本地代理软件">取决于软件和所选模式，各家做法不同。</td>
+            <td class="us" data-label="aibox">默认拒绝：隧道断开即断网，恢复后自动重连；可以用 <code>doctor --full</code> 实际验证。</td>
+          </tr>
+          <tr>
+            <th scope="row">文件可见范围</th>
+            <td data-label="本地代理软件">和网络无关，agent 以当前用户身份运行，能读到该用户能读的文件。</td>
+            <td class="us" data-label="aibox">只有授权的目录，每个目录可单独设为只读。</td>
+          </tr>
+          <tr>
+            <th scope="row">对宿主机网络的影响</th>
+            <td data-label="本地代理软件">系统代理或 TUN 模式作用于整台电脑。</td>
+            <td class="us" data-label="aibox">不影响，规则只在容器的网络命名空间里生效。</td>
+          </tr>
+          <tr>
+            <th scope="row">更适合</th>
+            <td data-label="本地代理软件">整台电脑的日常网络使用。</td>
+            <td class="us" data-label="aibox">让 AI agent 在隔离的环境里长时间工作。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 上手 ============ -->
+<section class="sec alt" id="start" aria-labelledby="start-title">
+  <div class="shell">
+    <p class="eyebrow">GET STARTED</p>
+    <h2 class="h2" id="start-title">三步上手，<br>剩下的交给向导。</h2>
+    <p class="lede">需要准备：Docker，以及一个代理订阅、Clash 节点或 WireGuard 配置。首次启动要构建镜像并安装 AI 工具，大约 3～5 分钟。</p>
+
+    <div class="two sec-body">
+      <ol class="steps">
+        <li>
+          <span class="n">[1]</span>
+          <div>
+            <h3>安装 Docker</h3>
+            <p>macOS 用 OrbStack 或 Docker Desktop，装好后启动它；Linux 用 Docker Engine，装完重新登录一次。</p>
+            <div class="os">
+              <div class="os-row"><span>macOS</span>
+                <div class="cli"><pre id="c-mac">brew install orbstack</pre><button class="copy" type="button" data-target="c-mac">复制</button></div>
+              </div>
+              <div class="os-row"><span>Linux</span>
+                <div class="cli"><pre id="c-linux">curl -fsSL https://get.docker.com | sudo sh &amp;&amp; sudo usermod -aG docker $USER</pre><button class="copy" type="button" data-target="c-linux">复制</button></div>
+              </div>
+            </div>
+            <p style="margin-top:12px">Windows：安装 Docker Desktop 并开启 WSL2 集成，之后的步骤都在 WSL 终端里进行。</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">[2]</span>
+          <div>
+            <h3>获取 aibox，运行配置向导</h3>
+            <p>向导会问出口、授权目录和 AI 工具，每一步回车即采用默认值。最后可以安装 <code>aibox</code> / <code>ai</code> 命令和 Tab 补全，直接启动并体检。</p>
+            <div class="code"><div class="code-bar"><span>bash</span><button class="mini copy" type="button" data-target="c-init">复制</button></div>
+<pre id="c-init">git clone https://github.com/OWNER/aibox ~/aibox
+cd ~/aibox
+./aibox init</pre></div>
+          </div>
+        </li>
+        <li>
+          <span class="n">[3]</span>
+          <div>
+            <h3>在项目里启动 Claude Code</h3>
+            <p>首次运行时按提示登录一次，凭据保存在持久化的 home 卷里。按 <code>Ctrl+b</code> 再按 <code>d</code> 离开，任务继续；再次运行同一条命令就回到原处。</p>
+            <div class="cli"><pre id="c-run">ai c myapp</pre><button class="copy" type="button" data-target="c-run">复制</button></div>
+          </div>
+        </li>
+      </ol>
+
+      <div>
+        <ul class="checks" aria-label="配置向导的 5 个步骤">
+          <li><span>[1/5]</span>环境检查：Docker、Compose 版本，Linux 上还检查 TUN 设备。</li>
+          <li><span>[2/5]</span>网络出口：订阅、节点、WireGuard 或商业 VPN，必填。</li>
+          <li><span>[3/5]</span>授权目录：路径支持 Tab 补全，每个目录选 rw 或 ro。</li>
+          <li><span>[4/5]</span>AI 工具：要装的工具、端口映射、API Key（用订阅账号登录可跳过）。</li>
+          <li><span>[5/5]</span>其他设置：时区、国内镜像源；检测到 SELinux 时才会询问。</li>
+        </ul>
+        <ul class="checks cmds below" aria-label="日常命令">
+          <li><span><code>ai c myapp</code></span>在 /workspace/myapp 启动 Claude Code</li>
+          <li><span><code>ai x myapp</code></span>在项目里启动 Codex</li>
+          <li><span><code>ai s</code></span>进入普通终端（tmux）</li>
+          <li><span><code>ai ls</code></span>查看所有会话</li>
+          <li><span><code>ai st</code></span>状态和出口 IP</li>
+          <li><span><code>ai q</code></span>停止（数据保留）</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 给 AI agent 用 ============ -->
+<section class="sec" id="agents" aria-labelledby="agents-title">
+  <div class="shell">
+    <p class="eyebrow">FOR AI AGENTS</p>
+    <h2 class="h2" id="agents-title">让宿主机上的 agent，<br>替你把它配好。</h2>
+    <p class="lede">每一项配置都有对应的非交互命令。仓库里的 <code>AGENTS.md</code> 和 <code>CLAUDE.md</code> 会被 Codex 和 Claude Code 自动读取，里面写了配置流程、报错的处理方法和不能越过的安全边界。在仓库目录里对 agent 说一句“帮我把 aibox 配好”就可以开始。</p>
+
+    <div class="two sec-body">
+      <div class="code">
+        <div class="code-bar"><span>非交互配置 · 订阅链接和目录换成你自己的</span><button class="mini copy" type="button" data-target="c-agent">复制</button></div>
+<pre id="c-agent">./aibox init --defaults                     <span class="c"># 生成默认配置，不覆盖已有配置</span>
+./aibox config proxy --sub "https://example.com/your-sub" --filter '日本|JP'
+./aibox mounts add rw ~/code/myapp
+./aibox mounts add ro ~/Documents/specs
+./aibox config tools claude codex
+<span class="c"># 可选：用 API Key 而不是账号登录时</span>
+printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
+./aibox config check &amp;&amp; ./aibox up &amp;&amp; ./aibox doctor --full</pre>
+      </div>
+      <ul class="ticks">
+        <li><span><b>不提问，看返回码</b>：成功返回 0，失败返回非 0，原因写到 stderr。</span></li>
+        <li><span><b>失败不改动原配置</b>：比如节点不合规，写入会被撤回，可以放心重试。</span></li>
+        <li><span><b>密钥不进命令行</b>：API Key 只从标准输入传入，VPN 密钥从环境变量读取，不会出现在命令参数里。</span></li>
+        <li><span><b>不猜、不越界</b>：订阅链接和要授权的目录由 agent 向你询问；它不会去改防火墙规则、放宽挂载范围或挂载 Docker socket。</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 体检 ============ -->
+<section class="sec alt" id="doctor" aria-labelledby="doctor-title">
+  <div class="shell">
+    <p class="eyebrow">DOCTOR</p>
+    <h2 class="h2" id="doctor-title">隔离有没有生效，<br>跑一遍就知道。</h2>
+    <p class="lede"><code>aibox doctor --full</code> 不只读配置，而是在容器里实际发请求验证：出口、DNS、IPv6、权限、挂载，还会模拟一次断线，确认流量被阻断后再恢复。全部打勾才算通过，有失败项时返回非 0。</p>
+
+    <div class="two sec-body">
+      <figure class="term" style="margin:0">
+        <div class="term-bar"><span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>aibox doctor --full</span><span class="tag">示意输出 · mihomo 网关</span></div>
+        <pre><span class="hd">宿主机</span>
+  <span class="ok">✔</span> 系统: Linux  Docker 29.x  Compose 2.40.x
+<span class="hd">容器</span>
+  <span class="ok">✔</span> 网关健康
+  <span class="ok">✔</span> workspace 运行中
+<span class="hd">出口</span>
+  <span class="ok">✔</span> 容器出口: 203.0.113.24 JP AS64500 Example
+    宿主机出口: 198.51.100.7
+<span class="hd">IPv6</span>
+  <span class="ok">✔</span> IPv6 出网被阻断
+  <span class="ok">✔</span> 无全局 IPv6 地址
+<span class="hd">DNS</span>
+  <span class="ok">✔</span> resolv.conf 指向网关本地 DNS (127.0.0.1)
+  <span class="ok">✔</span> 域名解析由网关接管（fake-ip，真实解析在代理远端完成）
+  <span class="ok">✔</span> 程序硬编码外部 DNS(@8.8.8.8) 也被劫持到网关
+  <span class="ok">✔</span> Google 权威 DNS 看到的查询来源: 203.0.113.30 edns0-client-subnet 203.0.113.0/24
+<span class="hd">隔离</span>
+  <span class="ok">✔</span> workspace 无 NET_ADMIN / NET_RAW / SYS_ADMIN（root 也改不了网络）
+  <span class="ok">✔</span> 绕过隧道直连物理网卡被防火墙拒绝
+  <span class="ok">✔</span> 上游只允许公网节点（宿主机 Clash / 局域网代理被防火墙禁止）
+  <span class="ok">✔</span> 当前节点: JP-Tokyo-01（组内无节点时为 REJECT 断网，不会回落直连）
+  <span class="ok">✔</span> mihomo 控制接口对 workspace 不可见
+<span class="hd">断线阻断（模拟隧道断开）</span>
+  <span class="ok">✔</span> 隧道断开后流量被完全阻断
+  <span class="ok">✔</span> 隧道断开后直连 IP 同样被阻断
+  <span class="ok">✔</span> 隧道恢复后自动重新联网（约 4 秒）
+<span class="hd">挂载</span>
+  <span class="ok">✔</span> /workspace/myapp (rw)
+  <span class="ok">✔</span> /workspace/specs (ro)
+
+<span class="ok">全部通过</span> (20 项)</pre>
+      </figure>
+      <div>
+        <ul class="checks" aria-label="体检项目">
+          <li><span>出口</span>容器的出口 IP 和地区，并和宿主机出口对比；两者相同会给出警告。</li>
+          <li><span>DNS</span>是否走网关本地解析；硬编码 8.8.8.8 是否也被劫持；权威 DNS 看到的来源是否是出口网段。</li>
+          <li><span>IPv6</span>IPv6 是否无法出网，容器里有没有全局 IPv6 地址。</li>
+          <li><span>隔离</span>workspace 的能力集；绕过隧道直连是否被拒；上游是否只能是公网；控制接口是否不可见。</li>
+          <li class="full"><span>断线</span>停掉代理或拉下 VPN 网卡，确认请求被阻断，再确认自动恢复。</li>
+          <li><span>挂载</span>每个授权目录的实际读写权限和配置的 ro / rw 是否一致。</li>
+        </ul>
+        <div class="cli below"><pre id="c-doctor">aibox doctor --full</pre><button class="copy" type="button" data-target="c-doctor">复制</button></div>
+        <p class="note"><span class="lbl">NOTE</span>上面的检查项以 mihomo 网关为例；使用 gluetun 时，DNS 和隔离部分的项目会少一些，断线测试改为拉下 VPN 网卡。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section class="sec" id="faq" aria-labelledby="faq-title">
+  <div class="shell">
+    <p class="eyebrow">FAQ</p>
+    <h2 class="h2" id="faq-title">动手之前，<br>你可能想问。</h2>
+    <div class="faq sec-body">
+      <details>
+        <summary><span>能不能直接用电脑上正在运行的 Clash？</span></summary>
+        <div class="ans">
+          <p>不能，这是有意的设计。Clash 的分流规则可能让一部分流量直连，出口就不受控了。指向本机、宿主机或局域网的上游会在配置校验和防火墙两层被拒绝。</p>
+          <p>做法是把 Clash 里用的订阅链接填进来：<code>aibox config proxy --sub "订阅链接"</code>。</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>支持哪些系统？</span></summary>
+        <div class="ans">
+          <p>支持 macOS（Apple Silicon 和 Intel，推荐 OrbStack，Docker Desktop、Colima 也可以）和 Linux（Docker Engine 25 及以上、Compose 2.24 及以上）。</p>
+          <p>已实测的环境是 Ubuntu 24.04 arm64、Docker 29、Compose 2.40，两种网关都通过了 <code>doctor --full</code>；脚本兼容 macOS 自带的 bash 3.2。真实的 Mac、SELinux 系统（Fedora / RHEL）和 rootless Docker 还没有实测过，遇到问题欢迎反馈。</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>首次启动要多久？</span></summary>
+        <div class="ans">
+          <p>大约 3～5 分钟：构建两个镜像，再经隧道安装你选择的 AI 工具。之后再启动不需要重新构建，AI 工具、登录凭据和 shell 历史都保存在持久化的 home 卷里。</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>Windows 怎么用？</span></summary>
+        <div class="ans">
+          <p>在 WSL2 里使用：安装 Docker Desktop 并开启 WSL2 集成，然后在 WSL 终端里 <code>git clone</code> 并运行 <code>./aibox init</code>，之后的用法和 Linux 一样。</p>
+        </div>
+      </details>
+      <details>
+        <summary><span><code>--yolo</code> 跳过确认，安全吗？</span></summary>
+        <div class="ans">
+          <p><code>ai c myapp --yolo</code> 会跳过工具自身的逐条确认。容器本身就是沙箱：agent 只能改动你授权为 rw 的目录，网络只能走网关。但在 rw 目录里，它可以做任何修改，所以重要的资料建议用 ro 授权，项目本身最好在 git 管理之下。</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>代理节点断了会怎样？</span></summary>
+        <div class="ans">
+          <p>容器里的程序会直接连不上网，而不是改走本地网络。节点恢复后自动重连，不用重启容器。如果 <code>aibox up</code> 提示网关不健康，运行 <code>aibox logs gateway</code> 查看原因，常见的是订阅下载失败或节点全部不可用。</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>aibox 和 Anthropic、OpenAI 有关系吗？</span></summary>
+        <div class="ans">
+          <p>没有。aibox 是独立的开源项目，只是在容器里运行这些工具，与 Anthropic、OpenAI 没有任何关联，也未获得它们的认可。使用 Claude Code、Codex 需要遵守各自的服务条款。</p>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="shell">
+    <div class="foot-grid">
+      <div>
+        <a class="logo" href="./"><i aria-hidden="true"></i>aibox</a>
+        <p style="margin:14px 0 0;max-width:28em">在 Docker 里运行 AI 编程工具的轻量 Linux 终端。出口可控，文件按目录授权。</p>
+      </div>
+      <div>
+        <h2>项目</h2>
+        <ul>
+          <li><a href="https://github.com/OWNER/aibox">GitHub 仓库</a></li>
+          <li><a href="https://github.com/OWNER/aibox/issues">问题反馈</a></li>
+          <li><a href="https://github.com/OWNER/aibox/blob/main/LICENSE">开源协议：LICENSE_NAME</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>文档</h2>
+        <ul>
+          <li><a href="https://github.com/OWNER/aibox/blob/main/docs/GUIDE.md">配置与使用指南</a></li>
+          <li><a href="https://github.com/OWNER/aibox/blob/main/docs/ARCHITECTURE.md">架构与安全设计</a></li>
+          <li><a href="https://github.com/OWNER/aibox/blob/main/AGENTS.md">AGENTS.md</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <p>aibox 是独立的开源项目，与 Anthropic、OpenAI 没有关联，也未获得其认可或背书。Claude Code、Codex 及相关名称是其各自所有者的商标，本站仅用于说明兼容性。</p>
+      <p>aibox 用于控制 AI 工具的网络出口、防止泄漏和隔离文件，请在遵守当地法律法规和所用服务条款的前提下使用。</p>
+      <p>本站不使用 Cookie，不加载任何统计或追踪脚本，也不请求第三方资源。</p>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

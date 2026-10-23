@@ -1,0 +1,29 @@
+# ============ mihomo 上游（必填；只允许 proxies: 和 proxy-providers: 两个顶层键）============
+# 网关会强制：全部流量 → PROXY 组（包含下面所有节点），没有任何直连规则。
+# 规则：
+#   - 至少填写一个远程节点或一个订阅，否则 aibox 拒绝启动
+#   - 节点地址不能是 localhost / host.docker.internal / 内网 IP（禁止用 Mac 上的 Clash 中转）
+#   - 不允许 type: direct 节点；订阅中混入的直连类节点会被自动排除
+# 如果你平时用 Clash，把 Clash 里的「订阅链接」填到下面示例 1 即可。
+#
+# --- 示例 1：Clash/mihomo 订阅 ---
+# proxy-providers:
+#   sub:
+#     type: http
+#     url: "https://example.com/your-subscription?flag=clash"
+#     interval: 3600
+#     path: ./providers/sub.yaml
+#     health-check: { enable: true, url: https://www.gstatic.com/generate_204, interval: 300 }
+#
+# --- 示例 2：手写节点 ---
+# proxies:
+#   - { name: my-ss, type: ss, server: 1.2.3.4, port: 8388, cipher: aes-256-gcm, password: "xxx", udp: true }
+#   - { name: my-trojan, type: trojan, server: example.com, port: 443, password: "xxx", sni: example.com, udp: true }
+#   - name: my-wg
+#     type: wireguard
+#     server: 5.6.7.8
+#     port: 51820
+#     ip: 10.0.0.2
+#     private-key: "xxx"
+#     public-key: "xxx"
+#     udp: true

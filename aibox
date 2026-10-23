@@ -1,0 +1,1432 @@
+#!/usr/bin/env bash
+# aibox — 基于 Docker 的轻量 AI 编程终端（macOS / Linux / WSL2；兼容 macOS 自带 bash 3.2）
+
+# 运行环境检查：必须放在最前面，并且只用 POSIX 语法。
+# 用 sh / zsh / dash 运行、或 bash 版本过低时，在执行任何 bash 专有语法之前给出明确提示
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "aibox 需要用 bash 运行，请直接执行 ./aibox（不要用 sh aibox 或 zsh aibox）" >&2; exit 1
+fi
+case "$BASH_VERSION" in
+  1.*|2.*|3.0.*|3.1.*)
+    echo "aibox 需要 bash 3.2 或更高版本，当前是 ${BASH_VERSION}。macOS 自带的 /bin/bash 即可；Linux 请安装新版 bash" >&2; exit 1 ;;
+esac
+
+set -euo pipefail
+
+# ---------- 定位项目目录（支持软链接到 PATH） ----------
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  d="$(cd -P "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$d/$src" ;; esac
+done
+ROOT="$(cd -P "$(dirname "$src")" && pwd)"
+CONF="$ROOT/config"
+ENV_FILE="$CONF/aibox.env"
+MOUNTS_FILE="$CONF/mounts.conf"
+UPSTREAM_FILE="$CONF/mihomo/upstream.yaml"
+WS_ENV_FILE="$CONF/workspace.env"
+GEN="$ROOT/.aibox/compose.generated.yaml"
+VALIDATOR="$ROOT/images/mihomo-gateway/validate-upstream.sh"
+WS=aibox-workspace
+GW=aibox-gateway
+KNOWN_TOOLS="claude codex gemini opencode"
+
+if [ -t 1 ]; then R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; C=$'\e[36m'; B=$'\e[1m'; D=$'\e[2m'; N=$'\e[0m'; else R=; G=; Y=; C=; B=; D=; N=; fi
+info() { echo "${G}==>${N} $*"; }
+warn() { echo "${Y}警告:${N} $*" >&2; }
+die()  { echo "${R}错误:${N} $*" >&2; exit 1; }
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
+yq()   { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '"%s"' "$s"; }   # YAML 双引号转义
+
+# ---------- 宿主机识别：系统、真实用户（兼容 sudo 运行） ----------
+case "$(uname -s)" in
+  Darwin) HOST_OS=macos ;;
+  Linux)  if grep -qi microsoft /proc/version 2>/dev/null; then HOST_OS=wsl; else HOST_OS=linux; fi ;;
+  MINGW*|MSYS*|CYGWIN*) HOST_OS=windows ;;
+  *) HOST_OS=other ;;
+esac
+USER_HOME="$HOME"
+# 用账户的主组（newgrp docker / sg docker 会临时改变 id -g，导致新建文件属于 docker 组）
+AIBOX_UID="$(id -u)"; AIBOX_GID="$(id -g "$(id -un)" 2>/dev/null || id -g)"
+RUN_AS_ROOT=0
+if [ "$AIBOX_UID" = 0 ]; then
+  if [ -n "${SUDO_UID:-}" ] && [ "${SUDO_UID}" != 0 ]; then
+    # 通过 sudo 运行：容器用户、~ 展开都按真实用户处理
+    AIBOX_UID="$SUDO_UID"; AIBOX_GID="${SUDO_GID:-$SUDO_UID}"
+    case "${SUDO_USER:-}" in ''|*[!A-Za-z0-9._-]*) ;; *) USER_HOME="$(eval echo "~$SUDO_USER")" ;; esac
+  else
+    RUN_AS_ROOT=1; AIBOX_UID=1000; AIBOX_GID=1000
+  fi
+fi
+export AIBOX_UID AIBOX_GID
+
+# sudo 运行时，生成的文件归还给真实用户，避免之后非 sudo 运行无权限
+fix_owner() {
+  if [ "$(id -u)" = 0 ] && [ -n "${SUDO_UID:-}" ]; then chown -R "$SUDO_UID:${SUDO_GID:-$SUDO_UID}" "$@" 2>/dev/null || true; fi
+}
+
+# ---------- Docker 环境检查（给出各平台的具体修复命令） ----------
+ver_ge() {  # ver_ge 最低版本 实际版本
+  awk -v a="$1" -v b="$2" 'BEGIN{sub(/^v/,"",b); split(a,x,"."); split(b,y,".");
+    for(i=1;i<=3;i++){ if((y[i]+0)>(x[i]+0)) exit 0; if((y[i]+0)<(x[i]+0)) exit 1 } exit 0 }'
+}
+DOCKER_OK=0
+# docker 不在 PATH 中时，到常见安装位置查找。
+# 典型情况：装完 OrbStack / Docker Desktop 后没有新开终端，或用 sudo 运行（PATH 被重置）
+find_docker() {
+  command -v docker >/dev/null 2>&1 && return 0
+  local d
+  for d in "$USER_HOME/.orbstack/bin" "$USER_HOME/.docker/bin" "$USER_HOME/.rd/bin" \
+           /Applications/Docker.app/Contents/Resources/bin /Applications/OrbStack.app/Contents/MacOS/xbin \
+           /usr/local/bin /opt/homebrew/bin /usr/bin /snap/bin; do
+    if [ -x "$d/docker" ]; then
+      PATH="$d:$PATH"; export PATH
+      warn "docker 不在当前终端的 PATH 中，已使用 $d/docker。新开一个终端窗口可以消除此提示"
+      return 0
+    fi
+  done
+  return 1
+}
+need_docker() {
+  [ "$DOCKER_OK" = 1 ] && return 0
+  [ "$HOST_OS" = windows ] && die "Windows 请在 WSL2 中运行 aibox（Docker Desktop 设置中开启 WSL 集成）"
+  if ! find_docker; then
+    case "$HOST_OS" in
+      macos) die "未找到 docker 命令。
+       - 还没装: brew install orbstack（或 Docker Desktop / Colima），然后启动它
+       - 已经装了: 先打开 OrbStack / Docker Desktop，再新开一个终端窗口重试；
+         仍不行请把这两条命令的输出发给我们: echo \$PATH; ls ~/.orbstack/bin ~/.docker/bin /usr/local/bin/docker" ;;
+      wsl)   die "未找到 docker。请安装 Docker Desktop for Windows 并开启 WSL 集成" ;;
+      *)     die "未找到 docker。安装: curl -fsSL https://get.docker.com | sudo sh
+       然后: sudo usermod -aG docker \$USER  并重新登录" ;;
+    esac
+  fi
+  local out; out="$(docker info 2>&1 >/dev/null || true)"
+  if ! docker info >/dev/null 2>&1; then
+    case "$out" in
+      *"permission denied"*) die "当前用户无权访问 Docker。执行: sudo usermod -aG docker \$USER  然后重新登录（或 newgrp docker）
+       临时也可以用: sudo aibox ..." ;;
+      *) case "$HOST_OS" in
+           macos) die "Docker 未运行：请启动 OrbStack / Docker Desktop" ;;
+           *)     die "Docker 未运行：sudo systemctl enable --now docker" ;;
+         esac ;;
+    esac
+  fi
+  docker compose version >/dev/null 2>&1 || die "缺少 Docker Compose v2。Debian/Ubuntu: sudo apt install docker-compose-plugin（或 docker-compose-v2）
+       其他发行版: 用 https://get.docker.com 安装官方版本"
+  local ev cv
+  ev="$(docker version -f '{{.Server.Version}}' 2>/dev/null || echo 0)"
+  cv="$(docker compose version --short 2>/dev/null || echo 0)"
+  ver_ge 25.0.0 "$ev" || die "Docker Engine 版本过低（${ev}，需要 ≥ 25）。请升级: https://docs.docker.com/engine/install/"
+  ver_ge 2.24.0 "$cv" || die "Docker Compose 版本过低（${cv}，需要 ≥ 2.24）。请升级 docker-compose-plugin"
+  if [ "$HOST_OS" = linux ] && [ ! -c /dev/net/tun ]; then
+    die "缺少 /dev/net/tun。执行: sudo modprobe tun && echo tun | sudo tee /etc/modules-load.d/tun.conf"
+  fi
+  docker info -f '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless && warn "检测到 rootless Docker：未经测试，TUN/防火墙可能不可用"
+  [ "$RUN_AS_ROOT" = 1 ] && warn "以 root 直接运行：容器内用户使用 UID 1000，挂载目录中新建文件将属于 UID 1000"
+  DOCKER_OK=1
+}
+
+selinux_enforcing() { command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" = Enforcing ]; }
+
+# ---------- 配置文件读写（纯 bash，不依赖 sed -i 的平台差异） ----------
+get_kv() {  # get_kv 文件 键
+  [ -f "$1" ] || return 0
+  local line val
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "$2="*) val="$(trim "${line#*=}")"
+      case "$val" in \"*\") val="${val#\"}"; val="${val%\"}" ;; esac
+      printf '%s' "$val"; return 0 ;; esac
+  done < "$1"
+}
+set_kv() {  # set_kv 文件 键 值（替换已有行，否则追加）
+  local f="$1" k="$2" v="$3" tmp line done=0
+  tmp="$f.tmp.$$"; : > "$tmp"
+  if [ -f "$f" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        "$k="*|"# $k="*) if [ "$done" = 0 ]; then printf '%s=%s\n' "$k" "$v" >> "$tmp"; done=1; fi ;;
+        *) printf '%s\n' "$line" >> "$tmp" ;;
+      esac
+    done < "$f"
+  fi
+  [ "$done" = 1 ] || printf '%s=%s\n' "$k" "$v" >> "$tmp"
+  mv "$tmp" "$f"
+}
+
+del_kv() {  # del_kv 文件 键
+  [ -f "$1" ] || return 0
+  local tmp="$1.tmp.$$" line; : > "$tmp"
+  while IFS= read -r line || [ -n "$line" ]; do case "$line" in "$2="*) ;; *) printf '%s\n' "$line" >> "$tmp" ;; esac; done < "$1"
+  mv "$tmp" "$1"
+}
+
+copy_examples() {  # 补齐缺失的配置文件，不覆盖已有内容
+  mkdir -p "$CONF"
+  local f n=0
+  while IFS= read -r f; do
+    f="${f#./}"
+    if [ ! -e "$CONF/$f" ]; then mkdir -p "$(dirname "$CONF/$f")"; cp "$ROOT/config.example/$f" "$CONF/$f"; n=$((n + 1)); fi
+  done < <(cd "$ROOT/config.example" && find . -type f)
+  chmod 600 "$WS_ENV_FILE" 2>/dev/null || true
+  fix_owner "$CONF"
+  echo "$n"
+}
+
+# 自己解析 KEY=VALUE，避免 shell 对空格/特殊字符的误解释；不执行任何代码
+load_env() {
+  [ -f "$ENV_FILE" ] || die "尚未配置，请先运行: aibox init（交互式配置向导）"
+  local line key val
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="$(trim "$line")"
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in *=*) ;; *) warn "aibox.env 忽略无效行: $line"; continue ;; esac
+    key="$(trim "${line%%=*}")"; val="$(trim "${line#*=}")"
+    case "$key" in *[!A-Za-z0-9_]*|'') warn "aibox.env 忽略无效键: $key"; continue ;; esac
+    case "$val" in \"*\") val="${val#\"}"; val="${val%\"}" ;; \'*\') val="${val#\'}"; val="${val%\'}" ;; esac
+    export "$key=$val"
+  done < "$ENV_FILE"
+  export AIBOX_GATEWAY="${AIBOX_GATEWAY:-mihomo}"
+  [ -f "$ROOT/gateways/$AIBOX_GATEWAY.yaml" ] || die "未知网关 AIBOX_GATEWAY=${AIBOX_GATEWAY}（可选: mihomo, gluetun）"
+  if [ "$AIBOX_GATEWAY" = gluetun ] && [ ! -f "$CONF/gluetun.env" ]; then die "缺少 config/gluetun.env（运行 aibox config 重新配置）"; fi
+  if [ -n "${AIBOX_UPSTREAM_PROXY:-}" ]; then
+    die "AIBOX_UPSTREAM_PROXY 已移除：为严格控制出口，不再支持把宿主机 Clash 等本地代理作为上游。
+       请删除 config/aibox.env 中这一行，并运行 aibox config 填写远程节点或订阅链接。"
+  fi
+}
+
+compose() {
+  docker compose --project-directory "$ROOT" \
+    -f "$ROOT/compose.yaml" -f "$ROOT/gateways/$AIBOX_GATEWAY.yaml" -f "$GEN" "$@"
+}
+
+# ---------- 授权目录 ----------
+expand_tilde() { case "$1" in "~") printf '%s' "$USER_HOME" ;; "~/"*) printf '%s/%s' "$USER_HOME" "${1#\~/}" ;; *) printf '%s' "$1" ;; esac; }
+
+# 校验宿主机路径并输出规范化绝对路径；失败时输出原因并返回 1
+canon_host_path() {
+  local host; host="$(expand_tilde "$1")"
+  case "$host" in /*) ;; *) echo "请使用绝对路径或 ~/ 开头: $1" >&2; return 1 ;; esac
+  [ -e "$host" ] || { echo "路径不存在: $host" >&2; return 1; }
+  if [ -d "$host" ]; then host="$(cd -P "$host" && pwd)"; else host="$(cd -P "$(dirname "$host")" && pwd)/$(basename "$host")"; fi
+  local home; home="$(cd -P "$USER_HOME" && pwd)"
+  if [ "$host" = / ] || [ "$host" = "$home" ] || case "$home/" in "$host"/*) true ;; *) false ;; esac; then
+    [ "${AIBOX_ALLOW_BROAD_MOUNT:-}" = 1 ] || { echo "拒绝挂载整个 /、用户主目录或其上级目录（请只授权具体项目目录）: $host" >&2; return 1; }
+  fi
+  [ "${AIBOX_ALLOW_BROAD_MOUNT:-}" = 1 ] || mount_guard "$host" || return 1
+  printf '%s' "$host"
+}
+
+# 防止授权目录成为绕过隔离的通道
+mount_guard() {
+  local h="$1" root s
+  root="$(cd -P "$ROOT" && pwd)"
+  case "$root/" in "$h"/*|"$h/") echo "拒绝挂载 ${h}：它包含 aibox 自身目录（${root}），容器内的 AI 可借此修改网关配置。请只授权具体的项目目录，或把 aibox 放到其它位置" >&2; return 1 ;; esac
+  case "$h/" in "$root"/*) echo "拒绝挂载 aibox 自身目录下的路径: $h" >&2; return 1 ;; esac
+  for s in .ssh .gnupg .aws .kube .docker .orbstack .colima .config/gcloud Library/Keychains; do
+    case "$h/" in "$USER_HOME/$s"/*) echo "拒绝挂载凭据目录: ${h}（需要 git/SSH 时请在容器内单独生成密钥）" >&2; return 1 ;; esac
+  done
+  case "$h/" in /var/run/*|/run/*|/private/var/run/*) echo "拒绝挂载 ${h}：可能包含 Docker socket（等同于宿主机 root 权限）" >&2; return 1 ;; esac
+  if [ -S "$h" ] || { [ -d "$h" ] && [ -S "$h/docker.sock" ]; }; then echo "拒绝挂载 Docker socket: $h" >&2; return 1; fi
+  return 0
+}
+
+# 解析 mounts.conf 一行 → 设置 M_MODE M_HOST(原文) M_TARGET；非挂载行返回 1
+parse_mount_line() {
+  local line mode rest host target
+  line="$(trim "$1")"
+  case "$line" in ''|'#'*) return 1 ;; esac
+  mode="${line%%[[:space:]]*}"; rest="$(trim "${line#"$mode"}")"; target=""
+  case "$rest" in *" -> "*) host="$(trim "${rest%% -> *}")"; target="$(trim "${rest#* -> }")" ;; *) host="$rest" ;; esac
+  [ -n "$target" ] || target="/workspace/$(basename "$(expand_tilde "$host")")"
+  case "$target" in /*) ;; *) target="/workspace/$target" ;; esac
+  M_MODE="$mode"; M_HOST="$host"; M_TARGET="$target"
+}
+
+list_projects() {  # 输出 /workspace 下的项目名（不需要 Docker）
+  [ -f "$MOUNTS_FILE" ] || return 0
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    parse_mount_line "$line" || continue
+    case "$M_TARGET" in /workspace/*) echo "${M_TARGET#/workspace/}" ;; esac
+  done < "$MOUNTS_FILE"
+}
+
+MOUNT_LIST=""   # 每行: mode<TAB>host<TAB>target
+gen_override() {
+  local vols="" summary="" targets="|" line host ln=0 bindopt="{ create_host_path: false }"
+  [ "${AIBOX_SELINUX_RELABEL:-}" = 1 ] && bindopt="{ create_host_path: false, selinux: z }"
+  MOUNT_LIST=""
+  if [ -f "$MOUNTS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      ln=$((ln + 1))
+      parse_mount_line "$line" || continue
+      case "$M_MODE" in rw|ro) ;; *) die "mounts.conf 第 $ln 行: 模式必须是 rw 或 ro: $line" ;; esac
+      host="$(canon_host_path "$M_HOST" 2>&1)" || die "mounts.conf 第 $ln 行: $host"
+      case "$targets" in *"|$M_TARGET|"*) die "mounts.conf 第 $ln 行: 容器路径重复: $M_TARGET" ;; esac
+      targets="$targets$M_TARGET|"
+      vols="$vols      - type: bind
+        source: $(yq "$host")
+        target: $(yq "$M_TARGET")
+        read_only: $([ "$M_MODE" = ro ] && echo true || echo false)
+        bind: $bindopt
+"
+      summary="$summary$M_MODE $host -> $M_TARGET;"
+      MOUNT_LIST="$MOUNT_LIST$M_MODE	$host	$M_TARGET
+"
+    done < "$MOUNTS_FILE"
+  fi
+
+  local ports="" inports="" p h c gwvols=""
+  for p in $(echo "${AIBOX_PORTS:-}" | tr ',' ' '); do
+    case "$p" in *:*) h="${p%%:*}"; c="${p##*:}" ;; *) h="$p"; c="$p" ;; esac
+    case "$h$c" in *[!0-9]*|'') die "AIBOX_PORTS 格式错误: ${p}（应为 3000 或 8080:80）" ;; esac
+    ports="$ports      - \"127.0.0.1:$h:$c\"
+"
+    inports="${inports:+$inports,}$c"
+  done
+  export AIBOX_INPUT_PORTS="$inports"
+  if [ "${AIBOX_SELINUX_RELABEL:-}" = 1 ]; then   # SELinux：网关的配置目录也需要重新打标签
+    if [ "$AIBOX_GATEWAY" = mihomo ]; then
+      gwvols="      - { type: bind, source: $(yq "$CONF/mihomo"), target: /config, read_only: true, bind: { selinux: z } }
+"
+    else
+      gwvols="      - { type: bind, source: $(yq "$CONF/gluetun"), target: /gluetun, bind: { selinux: z } }
+"
+    fi
+  fi
+
+  mkdir -p "$(dirname "$GEN")"
+  {
+    echo "# 由 aibox 根据 config/mounts.conf 与 AIBOX_PORTS 自动生成，请勿手改"
+    echo "services:"
+    echo "  workspace:"
+    echo "    environment:"
+    echo "      AIBOX_MOUNTS: $(yq "$summary")"
+    [ -z "$vols" ] || { echo "    volumes:"; printf '%s' "$vols"; }
+    if [ -n "$ports$gwvols" ]; then
+      echo "  gateway:"
+      [ -z "$ports" ] || { echo "    ports:"; printf '%s' "$ports"; }
+      [ -z "$gwvols" ] || { echo "    volumes:"; printf '%s' "$gwvols"; }
+    fi
+  } > "$GEN"
+  fix_owner "$ROOT/.aibox"
+}
+
+mounts_add() {  # mounts_add 模式 路径 [容器路径]
+  local mode="$1" host target="${3:-}" line rel
+  case "$mode" in rw|ro) ;; *) echo "模式必须是 rw 或 ro" >&2; return 1 ;; esac
+  host="$(canon_host_path "$2")" || return 1
+  [ -n "$target" ] || target="/workspace/$(basename "$host")"
+  case "$target" in /*) ;; *) target="/workspace/$target" ;; esac
+  if [ -f "$MOUNTS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      parse_mount_line "$line" || continue
+      [ "$M_TARGET" = "$target" ] && { echo "容器路径已被占用: ${target}（换个名字: aibox mounts add $mode $2 -> 新名字）" >&2; return 1; }
+    done < "$MOUNTS_FILE"
+  fi
+  rel="$host"
+  case "$host" in "$USER_HOME"/*) rel="~/${host#"$USER_HOME"/}" ;; esac
+  if [ "$target" = "/workspace/$(basename "$host")" ]; then line="$mode  $rel"; else line="$mode  $rel  -> $target"; fi
+  echo "$line" >> "$MOUNTS_FILE"
+  fix_owner "$MOUNTS_FILE"
+  echo "  已授权: $mode  $host  ->  $target"
+}
+
+mounts_rm() {  # 按 项目名 / 容器路径 / 宿主机路径 删除
+  local key="$1" tmp line n=0 hostc
+  [ -f "$MOUNTS_FILE" ] || return 1
+  tmp="$MOUNTS_FILE.tmp.$$"; : > "$tmp"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if parse_mount_line "$line"; then
+      hostc="$(expand_tilde "$M_HOST")"
+      if [ "$M_TARGET" = "$key" ] || [ "$M_TARGET" = "/workspace/$key" ] || [ "$M_HOST" = "$key" ] || [ "$hostc" = "$(expand_tilde "$key")" ]; then
+        n=$((n + 1)); echo "  已移除: $line"; continue
+      fi
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$MOUNTS_FILE"
+  mv "$tmp" "$MOUNTS_FILE"; fix_owner "$MOUNTS_FILE"
+  [ "$n" -gt 0 ] || { echo "未找到: ${key}（aibox mounts 查看列表）" >&2; return 1; }
+}
+
+is_running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" = true ]; }
+health()     { docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$1" 2>/dev/null || echo missing; }
+dexec()      { docker exec "$WS" bash -c "$1"; }
+# 注意：必须在脚本顶层判断；在 $(...) 中 stdout 是管道，[ -t 1 ] 永远为假
+if [ -t 0 ] && [ -t 1 ]; then TTY_FLAG=-it; else TTY_FLAG=-i; fi
+
+# 网关被单独重启过（网络命名空间已更换）时，workspace 需要重启以重新加入
+fix_netns() {
+  local gs ws
+  gs="$(docker inspect -f '{{.State.StartedAt}}' "$GW" 2>/dev/null || true)"
+  ws="$(docker inspect -f '{{.State.StartedAt}}' "$WS" 2>/dev/null || true)"
+  if [ -n "$gs" ] && [ -n "$ws" ] && [[ "$gs" > "$ws" ]]; then
+    info "网关已重启过，重新接入 workspace"
+    docker restart "$WS" >/dev/null
+  fi
+}
+
+# ================= 交互式配置向导 =================
+ask() {  # ask 变量名 提示 [默认值]
+  local __a
+  if [ -n "${3:-}" ]; then printf '  %s %s[%s]%s: ' "$2" "$D" "$3" "$N"; else printf '  %s: ' "$2"; fi
+  IFS= read -r __a || __a=""
+  __a="$(trim "$__a")"; [ -n "$__a" ] || __a="${3:-}"
+  printf -v "$1" '%s' "$__a"
+}
+ask_path() {  # 带 Tab 补全
+  local __a
+  IFS= read -e -r -p "  $2: " __a || __a=""
+  printf -v "$1" '%s' "$(trim "$__a")"
+}
+ask_secret() {
+  local __a
+  printf '  %s（输入不显示）: ' "$2"; IFS= read -rs __a || __a=""; echo
+  printf -v "$1" '%s' "$(trim "$__a")"
+}
+yesno() {  # yesno 提示 默认(y|n)
+  local a hint; [ "$2" = y ] && hint="Y/n" || hint="y/N"
+  while :; do
+    printf '  %s [%s]: ' "$1" "$hint"; IFS= read -r a || a=""; a="$(trim "$a")"; [ -n "$a" ] || a="$2"
+    case "$a" in y|Y|yes|是) return 0 ;; n|N|no|否) return 1 ;; esac
+  done
+}
+choose() {  # choose 变量名 默认序号 选项...
+  local __var="$1" __def="$2" __i=1 __o; shift 2
+  for __o in "$@"; do printf '   %s%d)%s %s\n' "$B" "$__i" "$N" "$__o"; __i=$((__i + 1)); done
+  while :; do
+    printf '  请选择 %s[%s]%s: ' "$D" "$__def" "$N"; IFS= read -r __o || __o=""; __o="$(trim "$__o")"; [ -n "$__o" ] || __o="$__def"
+    case "$__o" in *[!0-9]*|'') ;; *) if [ "$__o" -ge 1 ] && [ "$__o" -le $# ]; then printf -v "$__var" '%s' "$__o"; return; fi ;; esac
+    echo "  请输入 1-$#"
+  done
+}
+step() { echo; echo "${C}${B}[$1/5] $2${N}"; }
+
+upstream_header() {
+  cat <<'EOF'
+# 由 aibox 配置向导生成（可手动编辑；只允许 proxies: 和 proxy-providers:）
+# 规则：必须是远程节点/订阅；不能指向本机、宿主机或局域网（不支持经由本地 Clash 中转）
+EOF
+}
+
+# ---------- 写配置的共用函数（向导与非交互命令共用；失败时恢复原文件） ----------
+backup_file()  { [ -f "$1" ] && cp "$1" "$1.bak.$$" || true; }
+restore_file() { if [ -f "$1.bak.$$" ]; then mv "$1.bak.$$" "$1"; else rm -f "$1"; fi; }
+drop_backup()  { rm -f "$1.bak.$$"; }
+
+LINKS_FILE="$CONF/mihomo/links.txt"
+
+urldecode() { local s="${1//+/ }"; printf '%b' "${s//\%/\\x}"; }
+
+# ---------- 自动识别出口输入（订阅 / 分享链接 / 一键导入链接 / Base64 / Clash YAML） ----------
+# 结果: IMP_SUBS（订阅 URL，换行分隔） IMP_LINKS（分享链接，换行分隔） IMP_YAML（Clash 节点文本）
+classify_proxy_input() {
+  local text tok v tmp dec
+  text="$(printf '%s' "$1" | tr -d '\r')"
+  IMP_SUBS=""; IMP_LINKS=""; IMP_YAML=""
+  if printf '%s\n' "$text" | grep -qE '^(proxies|proxy-providers):|^[[:space:]]*-[[:space:]]*(\{[[:space:]]*)?name:'; then
+    IMP_YAML="$text"; return 0
+  fi
+  if printf '%s\n' "$text" | grep -q '^\[Interface\]'; then
+    echo "这是 WireGuard 配置，请保存为文件后使用: aibox config vpn --wireguard <文件>" >&2; return 1
+  fi
+  set -f
+  for tok in $text; do
+    case "$tok" in
+      *://*[?\&]url=*)   # clash://install-config?url=… / sing-box://import-remote-profile?url=… 等一键导入链接
+        case "$tok" in http://*|https://*) IMP_SUBS="$IMP_SUBS$tok
+"; continue ;; esac
+        v="${tok#*[?&]url=}"; v="${v%%&*}"; v="${v%%#*}"; v="$(urldecode "$v")"
+        case "$v" in http://*|https://*) IMP_SUBS="$IMP_SUBS$v
+" ;; *) set +f; echo "无法从一键导入链接中取出订阅地址: $(printf '%s' "$tok" | cut -c1-50)…" >&2; return 1 ;; esac ;;
+      http://*|https://*) IMP_SUBS="$IMP_SUBS$tok
+" ;;
+      *://*) IMP_LINKS="$IMP_LINKS$tok
+" ;;
+      *)  # 可能是整段 Base64（v2rayN / Shadowrocket 导出的订阅内容）
+        tmp="$CONF/.import.$$"; printf '%s' "$tok" > "$tmp"
+        dec="$(sh "$VALIDATOR" --normalize "$tmp" 2>/dev/null | grep '://' || true)"; rm -f "$tmp"
+        if [ -n "$dec" ]; then IMP_LINKS="$IMP_LINKS$dec
+"; else set +f; echo "无法识别: $(printf '%s' "$tok" | cut -c1-50)（支持订阅链接、vmess:// vless:// ss:// trojan:// hysteria2:// 等分享链接、Base64 订阅内容、Clash YAML）" >&2; return 1; fi ;;
+    esac
+  done
+  set +f
+  [ -n "$IMP_SUBS$IMP_LINKS" ] || { echo "没有输入任何链接" >&2; return 1; }
+}
+
+url_host() { local h="${1#*://}"; h="${h%%[/?#]*}"; h="${h##*@}"; case "$h" in \[*) h="${h#\[}"; h="${h%%\]*}" ;; *:*) h="${h%:*}" ;; esac; printf '%s' "$h"; }
+
+# 预先下载订阅：识别格式、统计节点、检查是否指向本机。无法下载时只警告（网关启动时会再试）
+PROBE_NAMES=""
+probe_subscription() {  # probe_subscription URL 序号
+  local url="$1" i="$2" tmp out fmt total loc types names label rc=0
+  tmp="$CONF/.probe.$$"
+  if ! curl -fsSL --max-time 20 -A "clash.meta" -o "$tmp" "$url" 2>"$tmp.err"; then
+    warn "订阅 ${i}：本机下载失败（$(tail -1 "$tmp.err" | sed 's/^curl: ([0-9]*) //')），已保存，网关启动时会再试"
+    rm -f "$tmp" "$tmp.err"; return 0
+  fi
+  rm -f "$tmp.err"
+  if head -c 2048 "$tmp" | grep -qiE '<!doctype html|<html'; then
+    rm -f "$tmp"; echo "订阅 ${i} 返回的是网页而不是订阅内容（链接可能已过期、需要登录，或被拦截）" >&2; return 1
+  fi
+  out="$(sh "$VALIDATOR" --content "$tmp")" || rc=$?
+  rm -f "$tmp"
+  fmt="$(printf '%s\n' "$out" | sed -n 's/^format=//p')"; total="$(printf '%s\n' "$out" | sed -n 's/^total=//p')"
+  loc="$(printf '%s\n' "$out" | sed -n 's/^local=//p')"; types="$(printf '%s\n' "$out" | sed -n 's/^types=//p')"
+  names="$(printf '%s\n' "$out" | sed -n 's/^names=//p')"
+  case "$fmt" in clash) label="Clash / mihomo 格式" ;; base64) label="Base64 格式（v2rayN / Shadowrocket 等）" ;; links) label="分享链接列表" ;; *) label="未知格式" ;; esac
+  if [ "${total:-0}" = 0 ]; then echo "订阅 ${i}：没有识别出任何节点（${label}）" >&2; return 1; fi
+  if [ "$rc" != 0 ]; then echo "订阅 ${i}：全部 $total 个节点都指向本机/局域网地址，严格出口策略不允许使用" >&2; return 1; fi
+  echo "  ${G}✔${N} 订阅 ${i}：${label}，$((total - loc)) 个可用节点（$(printf '%s' "$types" | sed 's/:/ /g; s/ *$//')）"
+  [ "${loc:-0}" = 0 ] || echo "    ${D}另有 $loc 个条目指向本机/局域网（通常是“剩余流量”“到期时间”等信息），防火墙会阻止，不会被选中${N}"
+  PROBE_NAMES="$PROBE_NAMES$names"
+}
+
+# 写入 upstream.yaml（订阅 → http 提供者，分享链接 → links.txt 文件提供者）；失败时恢复原文件
+write_import_upstream() {
+  local body n=1 u
+  body="$(upstream_header)
+proxy-providers:"
+  set -f
+  for u in $IMP_SUBS; do
+    body="$body
+  sub$n:
+    type: http
+    url: $(yq "$u")
+    interval: 3600
+    path: ./providers/sub$n.yaml
+    health-check: { enable: true, url: https://www.gstatic.com/generate_204, interval: 300 }"
+    n=$((n + 1))
+  done
+  set +f
+  if [ -n "$IMP_LINKS" ]; then body="$body
+  links:
+    type: file
+    path: ./links.txt
+    health-check: { enable: true, url: https://www.gstatic.com/generate_204, interval: 300 }"; fi
+  backup_file "$UPSTREAM_FILE"; backup_file "$LINKS_FILE"
+  printf '%s\n' "$body" > "$UPSTREAM_FILE"
+  if [ -n "$IMP_LINKS" ]; then printf '%s' "$IMP_LINKS" > "$LINKS_FILE"; chmod 600 "$LINKS_FILE"; else rm -f "$LINKS_FILE"; fi
+  if sh "$VALIDATOR" "$UPSTREAM_FILE" && { [ -z "$IMP_LINKS" ] || sh "$VALIDATOR" --links "$LINKS_FILE"; }; then
+    drop_backup "$UPSTREAM_FILE"; drop_backup "$LINKS_FILE"
+  else
+    restore_file "$UPSTREAM_FILE"; restore_file "$LINKS_FILE"; return 1
+  fi
+}
+
+# 一键导入：识别 → 检查 → 写入。import_proxy "输入文本" [nocheck]
+import_proxy() {
+  local check="${2:-check}" u i=0 h nl
+  classify_proxy_input "$1" || return 1
+  if [ -n "$IMP_YAML" ]; then
+    write_nodes_upstream "$IMP_YAML" || return 1
+    rm -f "$LINKS_FILE"; echo "  ${G}✔${N} 已识别为 Clash 节点"; return 0
+  fi
+  PROBE_NAMES=""
+  set -f
+  for u in $IMP_SUBS; do
+    i=$((i + 1)); h="$(url_host "$u")"
+    if ! sh "$VALIDATOR" --server "$h" 2>/dev/null; then
+      set +f; echo "订阅 ${i} 的地址 $h 是本机/局域网地址（例如本地 subconverter 或代理软件的订阅转换），网关无法访问。请使用机场提供的原始订阅链接" >&2; return 1
+    fi
+    if [ "$check" = check ]; then probe_subscription "$u" "$i" || { set +f; return 1; }; fi
+  done
+  set +f
+  if [ -n "$IMP_LINKS" ]; then
+    printf '%s' "$IMP_LINKS" > "$CONF/.links.$$"
+    if ! sh "$VALIDATOR" --links "$CONF/.links.$$"; then rm -f "$CONF/.links.$$"; return 1; fi
+    nl="$(sh "$VALIDATOR" --content "$CONF/.links.$$")"; rm -f "$CONF/.links.$$"
+    echo "  ${G}✔${N} 分享链接：$(printf '%s\n' "$nl" | sed -n 's/^total=//p') 个节点（$(printf '%s\n' "$nl" | sed -n 's/^types=//p' | sed 's/:/ /g; s/ *$//')）"
+    PROBE_NAMES="$PROBE_NAMES$(printf '%s\n' "$nl" | sed -n 's/^names=//p')"
+  fi
+  write_import_upstream
+}
+
+show_probe_names() {  # 列出部分节点名，方便写筛选正则
+  local n out="" IFS='	'
+  [ -n "$PROBE_NAMES" ] || return 0
+  for n in $PROBE_NAMES; do [ -n "$n" ] && out="$out  $(urldecode "$n")"; done
+  echo "  ${D}节点示例:${out}${N}"
+}
+
+write_sub_upstream() {  # write_sub_upstream URL...（兼容旧调用；不做预下载检查）
+  [ $# -gt 0 ] || { echo "至少需要一个订阅链接" >&2; return 1; }
+  local u; IMP_SUBS=""; IMP_LINKS=""
+  for u in "$@"; do
+    case "$u" in http://*|https://*) IMP_SUBS="$IMP_SUBS$u
+" ;; *) echo "订阅链接需以 http:// 或 https:// 开头: $u" >&2; return 1 ;; esac
+  done
+  write_import_upstream
+}
+
+write_nodes_upstream() {  # write_nodes_upstream "Clash YAML 文本"
+  local body="$1"
+  if ! printf '%s\n' "$body" | grep -qE '^(proxies|proxy-providers):'; then body="proxies:
+$body"; fi
+  backup_file "$UPSTREAM_FILE"
+  printf '%s\n%s\n' "$(upstream_header)" "$body" > "$UPSTREAM_FILE"
+  if sh "$VALIDATOR" "$UPSTREAM_FILE"; then drop_backup "$UPSTREAM_FILE"; rm -f "$LINKS_FILE"; else restore_file "$UPSTREAM_FILE"; return 1; fi
+}
+
+install_wireguard() {  # install_wireguard wg0.conf
+  local wg; wg="$(expand_tilde "$1")"
+  [ -f "$wg" ] && grep -q '^\[Interface\]' "$wg" && grep -q '^\[Peer\]' "$wg" && grep -qi '^Endpoint' "$wg" \
+    || { echo "不是有效的 WireGuard 配置（需要 [Interface]、[Peer] 和 Endpoint）: $1" >&2; return 1; }
+  check_wg_endpoint "$wg" || return 1
+  mkdir -p "$CONF/gluetun/wireguard"
+  # gluetun 要求 Address 带掩码
+  awk '/^[[:space:]]*[Aa]ddress[[:space:]]*=/ { n=split($0,a,"="); m=split(a[2],ips,","); out="";
+         for(i=1;i<=m;i++){ ip=ips[i]; gsub(/[[:space:]]/,"",ip); if(ip !~ /\//) ip=ip (ip ~ /:/ ? "/128" : "/32"); out=out (out?",":"") ip }
+         print "Address = " out; next } { print }' "$wg" > "$CONF/gluetun/wireguard/wg0.conf"
+  chmod 600 "$CONF/gluetun/wireguard/wg0.conf"
+  printf 'VPN_SERVICE_PROVIDER=custom\nVPN_TYPE=wireguard\n' > "$CONF/gluetun.env"; chmod 600 "$CONF/gluetun.env"
+  set_kv "$ENV_FILE" AIBOX_GATEWAY gluetun
+}
+
+write_provider_vpn() {  # write_provider_vpn 服务商 wireguard|openvpn 私钥 地址 用户 密码 国家
+  local prov="$1" vt="$2"
+  case "$prov" in ''|*[!a-z0-9_-]*) echo "服务商名称无效: ${prov}（小写，如 mullvad）" >&2; return 1 ;; esac
+  case "$vt" in
+    wireguard) [ -n "$3" ] || { echo "缺少 WireGuard 私钥（环境变量 WIREGUARD_PRIVATE_KEY）" >&2; return 1; } ;;
+    openvpn)   [ -n "$5" ] && [ -n "$6" ] || { echo "缺少 OpenVPN 用户名/密码（环境变量 OPENVPN_USER / OPENVPN_PASSWORD）" >&2; return 1; } ;;
+    *) echo "协议只能是 wireguard 或 openvpn" >&2; return 1 ;;
+  esac
+  { echo "VPN_SERVICE_PROVIDER=$prov"; echo "VPN_TYPE=$vt"
+    if [ "$vt" = wireguard ]; then echo "WIREGUARD_PRIVATE_KEY=$3"; [ -z "$4" ] || echo "WIREGUARD_ADDRESSES=$4"
+    else echo "OPENVPN_USER=$5"; echo "OPENVPN_PASSWORD=$6"; fi
+    [ -z "$7" ] || echo "SERVER_COUNTRIES=$7"
+  } > "$CONF/gluetun.env.new"
+  mv "$CONF/gluetun.env.new" "$CONF/gluetun.env"; chmod 600 "$CONF/gluetun.env"
+  set_kv "$ENV_FILE" AIBOX_GATEWAY gluetun
+}
+
+# WireGuard Endpoint 也执行严格出口策略：不能是本机/宿主机/局域网上的 VPN 服务
+check_wg_endpoint() {
+  local ep host
+  ep="$(awk -F= 'tolower($1) ~ /^[[:space:]]*endpoint[[:space:]]*$/ {gsub(/[[:space:]]/,"",$2); print $2; exit}' "$1")"
+  [ -n "$ep" ] || { echo "WireGuard 配置缺少 Endpoint: $1" >&2; return 1; }
+  case "$ep" in \[*\]:*) host="${ep#\[}"; host="${host%%\]*}" ;; *) host="${ep%:*}" ;; esac
+  sh "$VALIDATOR" --server "$host"
+}
+
+check_tools() { local t; for t in "$@"; do case " $KNOWN_TOOLS " in *" $t "*) ;; *) echo "未知工具: ${t}（可选: ${KNOWN_TOOLS}）" >&2; return 1 ;; esac; done; }
+check_ports() { case "$1" in *[!0-9,:]*) echo "端口格式错误: $1（应为 3000,5173 或 8080:80）" >&2; return 1 ;; esac; }
+
+wizard_network() {
+  local cur def opt url n=1 more filter body line
+  cur="$(get_kv "$ENV_FILE" AIBOX_GATEWAY)"; cur="${cur:-mihomo}"
+  def=1
+  if [ "$cur" = gluetun ] || sh "$VALIDATOR" "$UPSTREAM_FILE" >/dev/null 2>&1; then
+    def=5; echo "  当前: $([ "$cur" = gluetun ] && echo "VPN（gluetun）" || echo "代理（mihomo，upstream.yaml 已配置）")"
+  fi
+  echo "  所有流量都将强制经过这里配置的出口；断线时容器断网，不会回落直连。"
+  choose opt "$def" \
+    "订阅链接或节点分享链接（自动识别 Clash、v2rayN、Shadowrocket 等格式，推荐）" \
+    "手动粘贴节点（Clash YAML 格式的 proxies 列表）" \
+    "WireGuard 配置文件（自建 VPN）" \
+    "商业 VPN 服务（Mullvad / ProtonVPN / Surfshark 等）" \
+    "保持现有配置"
+  case "$opt" in
+    1)
+      echo "  ${D}支持：订阅链接（https://…）、分享链接（vmess:// vless:// ss:// trojan:// hysteria2:// 等）、"
+      echo "        一键导入链接（clash://install-config?url=…）、整段 Base64 订阅内容。"
+      echo "        v2rayN：订阅分组里复制订阅地址，或选中节点后“导出分享链接到剪贴板”。${N}"
+      local input
+      while :; do
+        echo "  粘贴后回车；可以粘贴多条（每行一条），最后再按一次回车结束："
+        input=""
+        while IFS= read -e -r line; do line="$(trim "$line")"; [ -n "$line" ] || break; input="$input$line
+"; done
+        [ -n "$input" ] || { echo "  没有输入任何内容"; continue; }
+        echo "  正在识别…"
+        if import_proxy "$input"; then break; fi
+        yesno "重新输入？（选 n 则保持原配置不变）" y || return 0
+      done
+      show_probe_names
+      echo "  ${D}提示：可以用正则只选部分节点，例如 日本|JP 或 香港|HK；留空表示全部节点自动择优${N}"
+      ask filter "节点筛选" "$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
+      set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"
+      set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo ;;
+    2)
+      while :; do
+        echo "  粘贴节点（Clash YAML 格式，可包含 proxies: 行），粘贴完成后输入单独一行 ${B}END${N} 回车："
+        body=""
+        while IFS= read -r line; do [ "$line" = END ] && break; body="$body$line
+"; done
+        if write_nodes_upstream "$body"; then break; fi
+        yesno "重新粘贴？（选 n 则保持原配置不变）" y || return 0
+      done
+      ask filter "节点筛选正则（留空=全部）" "$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
+      set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"
+      set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo ;;
+    3)
+      local wg
+      while :; do
+        ask_path wg "wg0.conf 文件路径（支持 Tab 补全）"
+        wg="$(expand_tilde "$wg")"
+        if [ -f "$wg" ] && grep -q '^\[Interface\]' "$wg" && grep -q '^\[Peer\]' "$wg" && grep -qi '^Endpoint' "$wg"; then break; fi
+        echo "  不是有效的 WireGuard 配置（需要 [Interface]、[Peer] 和 Endpoint）"
+      done
+      install_wireguard "$wg" || return 1
+      echo "  已复制到 config/gluetun/wireguard/wg0.conf" ;;
+    4)
+      local prov vt key addr user pass countries
+      echo "  ${D}服务商名称见 https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers${N}"
+      ask prov "服务商（小写，如 mullvad / protonvpn / surfshark / nordvpn）"
+      echo "  协议:"; choose vt 1 "WireGuard（推荐）" "OpenVPN"
+      key=""; addr=""; user=""; pass=""
+      if [ "$vt" = 1 ]; then
+        ask_secret key "WireGuard 私钥 (WIREGUARD_PRIVATE_KEY)"
+        ask addr "WireGuard 地址 (WIREGUARD_ADDRESSES，如 10.64.0.1/32)"
+      else
+        ask user "OpenVPN 用户名"; ask_secret pass "OpenVPN 密码"
+      fi
+      ask countries "出口国家（英文，如 Japan,Singapore；留空=自动）"
+      write_provider_vpn "$prov" "$([ "$vt" = 1 ] && echo wireguard || echo openvpn)" "$key" "$addr" "$user" "$pass" "$countries" || return 1
+      echo "  已写入 config/gluetun.env（其它高级选项可手动编辑）" ;;
+    5) : ;;
+  esac
+}
+
+wizard_mounts() {
+  local existing="" line p mode tgt
+  if [ -f "$MOUNTS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do parse_mount_line "$line" && existing="$existing    $M_MODE  $M_HOST  ->  $M_TARGET
+"; done < "$MOUNTS_FILE"
+  fi
+  echo "  只有授权的目录会出现在容器中（/workspace/<名字>），其余文件对容器完全不可见。"
+  echo "  rw = 读写（AI 可以修改）  ro = 只读（内核强制，AI 无法修改）"
+  if [ -n "$existing" ]; then
+    echo "  已授权:"; printf '%s' "$existing"
+    if ! yesno "保留以上授权？" y; then
+      grep -E '^[[:space:]]*(#|$)' "$MOUNTS_FILE" > "$MOUNTS_FILE.tmp.$$" || true; mv "$MOUNTS_FILE.tmp.$$" "$MOUNTS_FILE"
+    fi
+  fi
+  while :; do
+    ask_path p "添加目录（Tab 补全，直接回车结束）"
+    [ -n "$p" ] || break
+    ask mode "权限 rw/ro" rw
+    case "$mode" in rw|ro) ;; *) echo "  请输入 rw 或 ro"; continue ;; esac
+    mounts_add "$mode" "$p" || true
+  done
+}
+
+wizard_tools() {
+  local tools t ports k
+  echo "  可选: $KNOWN_TOOLS"
+  while :; do
+    ask tools "要安装的 AI 工具（空格分隔）" "$(get_kv "$ENV_FILE" AIBOX_TOOLS)"
+    check_tools $tools && break
+  done
+  set_kv "$ENV_FILE" AIBOX_TOOLS "$tools"
+  echo "  ${D}开发服务器端口会映射到本机 127.0.0.1（服务需监听 0.0.0.0），例如 3000,5173${N}"
+  while :; do
+    ask ports "映射端口（留空=不映射）" "$(get_kv "$ENV_FILE" AIBOX_PORTS)"
+    check_ports "$ports" && break
+  done
+  set_kv "$ENV_FILE" AIBOX_PORTS "$ports"
+  echo "  ${D}使用 Claude / ChatGPT 订阅账号的，可以跳过这一步，进入容器后再登录${N}"
+  if yesno "现在配置 API Key？" n; then
+    case " $tools " in *" claude "*) ask_secret k "ANTHROPIC_API_KEY（留空跳过）"; [ -z "$k" ] || set_kv "$WS_ENV_FILE" ANTHROPIC_API_KEY "$k" ;; esac
+    case " $tools " in *" codex "*) ask_secret k "OPENAI_API_KEY（留空跳过）"; [ -z "$k" ] || set_kv "$WS_ENV_FILE" OPENAI_API_KEY "$k" ;; esac
+    case " $tools " in *" gemini "*) ask_secret k "GEMINI_API_KEY（留空跳过）"; [ -z "$k" ] || set_kv "$WS_ENV_FILE" GEMINI_API_KEY "$k" ;; esac
+    chmod 600 "$WS_ENV_FILE"
+  fi
+}
+
+host_tz() {
+  local l; l="$(readlink /etc/localtime 2>/dev/null || true)"
+  case "$l" in *zoneinfo/*) echo "${l##*zoneinfo/}"; return ;; esac
+  [ -f /etc/timezone ] && { cat /etc/timezone; return; }
+  echo UTC
+}
+
+wizard_misc() {
+  local tz mdef
+  ask tz "时区" "$(get_kv "$ENV_FILE" AIBOX_TZ | grep . || host_tz)"
+  set_kv "$ENV_FILE" AIBOX_TZ "$tz"
+  case "$tz" in Asia/Shanghai|Asia/Chongqing|Asia/Urumqi|Asia/Harbin|PRC) mdef=y ;; *) mdef=n ;; esac
+  [ -n "$(get_kv "$ENV_FILE" AIBOX_APT_MIRROR)" ] && mdef=y
+  echo "  ${D}构建镜像时下载系统软件包走本机网络（不经代理），国内建议使用镜像源${N}"
+  if yesno "使用清华镜像源加速构建？" "$mdef"; then
+    set_kv "$ENV_FILE" AIBOX_APT_MIRROR "http://mirrors.tuna.tsinghua.edu.cn"
+  else
+    set_kv "$ENV_FILE" AIBOX_APT_MIRROR ""
+  fi
+  if selinux_enforcing; then
+    echo "  检测到 SELinux（Enforcing）：挂载目录需要重新打标签（:z）容器才能访问"
+    if yesno "允许 aibox 为授权目录设置 SELinux 共享标签？" y; then set_kv "$ENV_FILE" AIBOX_SELINUX_RELABEL 1; else set_kv "$ENV_FILE" AIBOX_SELINUX_RELABEL 0; fi
+  fi
+}
+
+wizard_summary() {
+  local gw; gw="$(get_kv "$ENV_FILE" AIBOX_GATEWAY)"
+  echo; echo "${B}配置完成${N}（保存在 config/，可随时运行 ${B}aibox config${N} 修改）"
+  echo "  出口:   $([ "$gw" = gluetun ] && echo "VPN（gluetun，$(get_kv "$CONF/gluetun.env" VPN_SERVICE_PROVIDER)）" || echo "代理（mihomo）  节点筛选: $(get_kv "$ENV_FILE" AIBOX_NODE_FILTER | grep . || echo 全部)")"
+  echo "  工具:   $(get_kv "$ENV_FILE" AIBOX_TOOLS)"
+  echo "  端口:   $(get_kv "$ENV_FILE" AIBOX_PORTS | grep . || echo 无)"
+  echo "  项目:   $(list_projects | paste -sd' ' - | grep . || echo "（未授权任何目录）")"
+}
+
+cmd_wizard() {
+  local start="${1:-ask}"
+  [ -t 0 ] || die "配置向导需要交互式终端。非交互环境可用: aibox init --defaults，然后 aibox config set / aibox mounts add"
+  copy_examples >/dev/null
+  echo "${B}aibox 配置向导${N}  ${D}（回车使用 [默认值]，Ctrl+C 随时退出，已保存的步骤不会丢失）${N}"
+  step 1 "环境检查"
+  case "$HOST_OS" in macos) echo "  系统: macOS" ;; linux) echo "  系统: Linux ($(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" || uname -r))" ;; wsl) echo "  系统: Windows WSL2" ;; *) echo "  系统: $HOST_OS" ;; esac
+  find_docker 2>/dev/null || true   # 在当前 shell 中补上 PATH，后面的启动步骤也能用
+  if ( need_docker ) 2>/dev/null; then
+    echo "  Docker: ${G}✔${N} $(docker version -f '{{.Server.Version}}' 2>/dev/null)  Compose: $(docker compose version --short 2>/dev/null)"
+  else
+    ( need_docker ) || true
+    echo "  ${Y}Docker 尚未就绪，可以先完成配置，修复后再运行 aibox up${N}"
+    start=no
+  fi
+  step 2 "网络出口";   until wizard_network; do echo "  ${Y}未保存，请重新选择${N}"; done
+  step 3 "授权目录";   wizard_mounts
+  step 4 "AI 工具";    wizard_tools
+  step 5 "其他设置";   wizard_misc
+  fix_owner "$CONF"
+  wizard_summary
+  if [ "$HOST_OS" != windows ] && ! command -v aibox >/dev/null 2>&1; then
+    echo; yesno "安装 aibox 命令（以后在任意目录直接输入 aibox / ai）？" y && cmd_install || true
+  fi
+  [ "$start" = no ] && { echo; echo "下一步: ${B}aibox up${N}"; return 0; }
+  [ "$start" = ask ] || return 0
+  echo
+  if yesno "现在启动？（首次需构建镜像，约 3-5 分钟）" y; then
+    cmd_up
+    echo; yesno "运行网络隔离体检？" y && ( cmd_doctor ) || true
+    echo; echo "开始使用: ${B}aibox claude${N} <项目>  或  ${B}aibox shell${N}    教程: ${B}aibox guide${N}"
+  fi
+}
+
+# ================= 命令 =================
+cmd_init() {
+  if [ "${1:-}" = "--defaults" ] || [ ! -t 0 ]; then
+    local n; n="$(copy_examples)"
+    [ "$n" -gt 0 ] && echo "已生成默认配置到 config/" || echo "配置已存在，未覆盖"
+    echo "下一步: 编辑 config/mihomo/upstream.yaml（必填节点或订阅）与 config/mounts.conf，然后 aibox up"
+    echo "        或在交互终端中运行 aibox config 使用配置向导"
+    return 0
+  fi
+  cmd_wizard
+}
+
+# 非交互配置命令（供 agent / 脚本使用）：不提问，成功返回 0，失败返回非 0 且不改动原配置
+cmd_config() {
+  local sub="${1:-}"; [ $# -gt 0 ] && shift
+  case "$sub" in
+    ''|wizard) cmd_wizard ;;
+    show)
+      [ -f "$ENV_FILE" ] || die "尚未配置: aibox init"
+      grep -vE '^[[:space:]]*(#|$)' "$ENV_FILE"
+      echo "--- 授权目录"; list_mounts_raw
+      echo "--- 上游"
+      if [ "$(get_kv "$ENV_FILE" AIBOX_GATEWAY)" = gluetun ]; then echo "VPN: $(get_kv "$CONF/gluetun.env" VPN_SERVICE_PROVIDER)/$(get_kv "$CONF/gluetun.env" VPN_TYPE)"
+      else grep -vE '^[[:space:]]*(#|$)' "$UPSTREAM_FILE" 2>/dev/null | sed -E 's/(password|uuid|private-key|url|token): *("[^"]*"|[^,}]*)/\1: ***/g' | head -20
+        [ -f "$LINKS_FILE" ] && echo "分享链接: $(grep -c '://' "$LINKS_FILE") 条（config/mihomo/links.txt）"; fi
+      echo "--- API Key"; grep -oE '^[A-Z_]+=.' "$WS_ENV_FILE" 2>/dev/null | sed 's/=.$/ (已设置)/' || echo "  （无）" ;;
+    get) [ $# -ge 1 ] || die "用法: aibox config get KEY"; get_kv "$ENV_FILE" "$1"; echo ;;
+    set)
+      [ $# -ge 1 ] || die "用法: aibox config set KEY VALUE   例: aibox config set AIBOX_TZ Asia/Shanghai"
+      case "$1" in AIBOX_*) ;; *) die "只能设置 AIBOX_ 开头的键" ;; esac
+      case "$1" in
+        AIBOX_UPSTREAM_PROXY) die "AIBOX_UPSTREAM_PROXY 已移除（严格出口策略），请用 aibox config proxy --sub <订阅>" ;;
+        AIBOX_ALLOW_BROAD_MOUNT) die "AIBOX_ALLOW_BROAD_MOUNT 只能由用户手动写入 config/aibox.env" ;;
+        AIBOX_TOOLS) check_tools ${2:-} || exit 1 ;;
+        AIBOX_PORTS) check_ports "${2:-}" || exit 1 ;;
+        AIBOX_GATEWAY) case "${2:-}" in mihomo|gluetun) ;; *) die "AIBOX_GATEWAY 只能是 mihomo 或 gluetun" ;; esac ;;
+      esac
+      copy_examples >/dev/null; set_kv "$ENV_FILE" "$1" "${2:-}"; fix_owner "$ENV_FILE"
+      echo "已设置 $1=${2:-}（aibox up 生效）" ;;
+    proxy|network)
+      if [ $# -eq 0 ]; then
+        [ -t 0 ] || die "非交互用法: aibox config proxy --sub <订阅链接>（详见 aibox config help）"
+        copy_examples >/dev/null; until wizard_network; do :; done; fix_owner "$CONF"; return
+      fi
+      local subs=() nodes="" filter="" setf=0 gt="" input="" check=check
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          -) input="$input$(cat)
+" ;;
+          --no-check) check=nocheck ;;
+          --sub) [ -n "${2:-}" ] || die "--sub 需要订阅链接"; subs+=("$2"); shift ;;
+          --nodes) [ -n "${2:-}" ] || die "--nodes 需要文件路径（- 表示标准输入）"; nodes="$2"; shift ;;
+          --filter) filter="${2:-}"; setf=1; shift ;;
+          --group) gt="${2:-}"; case "$gt" in fallback|url-test|load-balance) ;; *) die "--group 可选: fallback url-test load-balance" ;; esac; shift ;;
+          -*) die "未知参数 $1（可用: <链接>… | - | --sub URL | --nodes 文件|- | --filter 正则 | --group 策略 | --no-check）" ;;
+          *) input="$input$1
+" ;;
+        esac; shift
+      done
+      copy_examples >/dev/null
+      if [ ${#subs[@]} -gt 0 ]; then input="$input$(printf '%s\n' "${subs[@]}")
+"; fi
+      if [ -n "$input" ] && [ -n "$nodes" ]; then die "链接和 --nodes 二选一"; fi
+      if [ -n "$(trim "$input")" ]; then
+        import_proxy "$input" "$check" || exit 1
+        [ -z "$PROBE_NAMES" ] || show_probe_names
+      elif [ -n "$nodes" ]; then
+        local txt
+        if [ "$nodes" = - ]; then txt="$(cat)"; else [ -f "$nodes" ] || die "文件不存在: $nodes"; txt="$(cat "$nodes")"; fi
+        write_nodes_upstream "$txt" || exit 1
+      elif [ "$setf" = 0 ] && [ -z "$gt" ]; then die "需要订阅链接、分享链接或 --nodes（例: aibox import \"<链接>\"）"; fi
+      [ "$setf" = 1 ] && set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"
+      [ -n "$gt" ] && set_kv "$ENV_FILE" AIBOX_GROUP_TYPE "$gt"
+      set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo; fix_owner "$CONF"
+      echo "已配置代理出口（mihomo）。aibox up 生效" ;;
+    vpn)
+      if [ $# -eq 0 ]; then
+        [ -t 0 ] || die "非交互用法: aibox config vpn --wireguard <wg0.conf>（详见 aibox config help）"
+        copy_examples >/dev/null; until wizard_network; do :; done; fix_owner "$CONF"; return
+      fi
+      local wg="" prov="" vt=wireguard countries=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --wireguard) wg="${2:-}"; shift ;;
+          --provider) prov="${2:-}"; shift ;;
+          --type) vt="${2:-}"; shift ;;
+          --countries) countries="${2:-}"; shift ;;
+          *) die "未知参数 $1（可用: --wireguard 文件 | --provider 名称 [--type wireguard|openvpn] [--countries 国家]）" ;;
+        esac; shift
+      done
+      copy_examples >/dev/null
+      if [ -n "$wg" ]; then install_wireguard "$wg" || exit 1
+      elif [ -n "$prov" ]; then
+        # 密钥只从环境变量读取，避免出现在命令行参数/历史记录中
+        write_provider_vpn "$prov" "$vt" "${WIREGUARD_PRIVATE_KEY:-}" "${WIREGUARD_ADDRESSES:-}" "${OPENVPN_USER:-}" "${OPENVPN_PASSWORD:-}" "$countries" || exit 1
+      else die "需要 --wireguard 或 --provider"; fi
+      fix_owner "$CONF"; echo "已配置 VPN 出口（gluetun）。aibox up 生效" ;;
+    tools)
+      if [ $# -eq 0 ]; then
+        [ -t 0 ] || die "用法: aibox config tools claude codex"
+        copy_examples >/dev/null; wizard_tools; fix_owner "$CONF"; return
+      fi
+      check_tools "$@" || exit 1; copy_examples >/dev/null; set_kv "$ENV_FILE" AIBOX_TOOLS "$*"; fix_owner "$ENV_FILE"
+      echo "AI 工具: $*（aibox up 后自动安装缺失的）" ;;
+    ports)
+      check_ports "${1:-}" || exit 1; copy_examples >/dev/null; set_kv "$ENV_FILE" AIBOX_PORTS "${1:-}"; fix_owner "$ENV_FILE"
+      echo "映射端口: ${1:-无}（aibox up 生效）" ;;
+    key)
+      [ $# -ge 1 ] || die "用法: printf %s \"\$KEY\" | aibox config key ANTHROPIC_API_KEY    删除: aibox config key NAME --unset"
+      case "$1" in *[!A-Z0-9_]*|'') die "变量名只能包含大写字母、数字和下划线" ;; esac
+      copy_examples >/dev/null
+      if [ "${2:-}" = --unset ]; then del_kv "$WS_ENV_FILE" "$1"; echo "已删除 $1"; return; fi
+      [ $# -eq 1 ] || die "密钥不能作为命令参数传入（会留在历史记录中），请从标准输入传入"
+      local v
+      if [ -t 0 ]; then ask_secret v "$1"; else IFS= read -r v || true; fi
+      v="$(trim "$v")"; [ -n "$v" ] || die "值为空"
+      set_kv "$WS_ENV_FILE" "$1" "$v"; chmod 600 "$WS_ENV_FILE"; fix_owner "$WS_ENV_FILE"
+      echo "已保存 $1 到 config/workspace.env（aibox up 生效）" ;;
+    check)
+      [ -f "$ENV_FILE" ] || die "尚未配置: aibox init"
+      ( load_env; gen_override
+        if [ "$AIBOX_GATEWAY" = mihomo ]; then sh "$VALIDATOR" "$UPSTREAM_FILE" || exit 1
+          if [ -f "$LINKS_FILE" ]; then sh "$VALIDATOR" --links "$LINKS_FILE" || exit 1; fi
+        else
+          [ -s "$CONF/gluetun.env" ] || die "config/gluetun.env 为空（aibox config vpn ...）"
+          if [ "$(get_kv "$CONF/gluetun.env" VPN_SERVICE_PROVIDER)" = custom ] && [ "$(get_kv "$CONF/gluetun.env" VPN_TYPE)" = wireguard ]; then
+            [ -s "$CONF/gluetun/wireguard/wg0.conf" ] || die "缺少 config/gluetun/wireguard/wg0.conf（aibox config vpn --wireguard 文件）"
+            check_wg_endpoint "$CONF/gluetun/wireguard/wg0.conf" || exit 1
+          fi
+        fi
+        check_tools ${AIBOX_TOOLS:-claude codex} || exit 1
+        check_ports "${AIBOX_PORTS:-}" || exit 1
+        echo "配置检查通过：网关 ${AIBOX_GATEWAY}，授权目录 $(list_projects | grep -c . || true) 个，端口 ${AIBOX_PORTS:-无}"
+      ) ;;
+    edit)
+      local f
+      case "${1:-env}" in env) f="$ENV_FILE" ;; mounts) f="$MOUNTS_FILE" ;; upstream|proxy) f="$UPSTREAM_FILE" ;; vpn|gluetun) f="$CONF/gluetun.env" ;; keys|workspace) f="$WS_ENV_FILE" ;; *) die "可选: env mounts upstream vpn keys" ;; esac
+      copy_examples >/dev/null; "${EDITOR:-vi}" "$f" ;;
+    mounts) [ -t 0 ] || die "非交互请用: aibox mounts add|rm"; copy_examples >/dev/null; wizard_mounts ;;
+    help|-h|--help) config_usage ;;
+    *) config_usage; exit 1 ;;
+  esac
+}
+
+config_usage() {
+  cat <<USAGE
+${B}aibox config${N} — 配置（不带参数 = 交互式向导；带参数 = 非交互，适合 agent / 脚本）
+
+  aibox config                                  交互式向导（全部步骤）
+  aibox config show                             查看当前配置（密钥脱敏）
+  aibox config check                            校验全部配置（不需要 Docker；失败返回非 0）
+
+  ${B}网络出口${N}（二选一）
+  aibox import "<订阅或分享链接>" [更多…]        自动识别格式（= aibox config proxy <链接>…）
+  aibox import -                                从标准输入读取，例如 pbpaste | aibox import -
+                                                会先下载订阅检查格式和节点；--no-check 跳过
+  aibox config proxy --sub <订阅链接> [--sub <链接2>] [--filter <正则>] [--group fallback|url-test|load-balance]
+  aibox config proxy --nodes <文件|->           Clash YAML 节点（- 表示从标准输入读取）
+  aibox config vpn --wireguard <wg0.conf>       自建 WireGuard
+  aibox config vpn --provider <服务商> [--type wireguard|openvpn] [--countries Japan]
+                                                密钥从环境变量读取: WIREGUARD_PRIVATE_KEY WIREGUARD_ADDRESSES
+                                                OPENVPN_USER OPENVPN_PASSWORD
+  ${B}授权目录${N}
+  aibox mounts add [rw|ro] <路径> [-> <名字>]   aibox mounts rm <名字|路径>   aibox mounts
+  ${B}其它${N}
+  aibox config tools claude codex [gemini opencode]
+  aibox config ports 3000,5173,8080:80          （空字符串 = 不映射）
+  printf %s "\$KEY" | aibox config key ANTHROPIC_API_KEY     （密钥只从标准输入读取）
+  aibox config set AIBOX_<键> <值>   aibox config get AIBOX_<键>   aibox config edit env|mounts|upstream|vpn|keys
+
+修改后执行 ${B}aibox up${N} 生效。
+USAGE
+}
+
+list_mounts_raw() {
+  local line any=0
+  if [ -f "$MOUNTS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      if parse_mount_line "$line"; then echo "  $M_MODE  $M_HOST  ->  $M_TARGET"; any=1; fi
+    done < "$MOUNTS_FILE"
+  fi
+  [ "$any" = 1 ] || echo "  （无）"
+}
+
+cmd_up() {
+  if [ ! -f "$ENV_FILE" ]; then
+    [ -t 0 ] || die "尚未配置，请先运行: aibox init"
+    echo "尚未配置，启动配置向导…"; cmd_wizard noask
+  fi
+  need_docker; load_env; gen_override
+  if [ "$AIBOX_GATEWAY" = mihomo ]; then
+    sh "$VALIDATOR" "$UPSTREAM_FILE" || die "请运行 aibox import \"<订阅或分享链接>\" 或 aibox config network 后重试"
+    if [ -f "$LINKS_FILE" ]; then sh "$VALIDATOR" --links "$LINKS_FILE" || die "请检查 config/mihomo/links.txt"; fi
+  elif [ -f "$CONF/gluetun/wireguard/wg0.conf" ] && [ "$(get_kv "$CONF/gluetun.env" VPN_SERVICE_PROVIDER)" = custom ]; then
+    check_wg_endpoint "$CONF/gluetun/wireguard/wg0.conf" || die "请使用远程 WireGuard 服务器（aibox config vpn --wireguard <文件>）"
+  fi
+  if [ -f "$MOUNTS_FILE" ] && selinux_enforcing && [ -z "${AIBOX_SELINUX_RELABEL:-}" ]; then
+    warn "SELinux 为 Enforcing，挂载目录可能无法访问；运行 aibox config set AIBOX_SELINUX_RELABEL 1"
+  fi
+  info "启动 aibox（网关: ${AIBOX_GATEWAY}）"
+  # 每次都检查构建（有缓存时很快），确保 aibox 更新后网关的安全规则立即生效
+  local build=(--build)
+  docker compose up --help 2>/dev/null | grep -q -- --quiet-build && build=(--build --quiet-build)
+  if ! compose up -d "${build[@]}" --wait --wait-timeout "${AIBOX_WAIT_TIMEOUT:-180}" "$@"; then
+    echo; warn "启动失败，网关日志："
+    docker logs --tail 30 "$GW" 2>&1 | sed 's/^/    /' || true
+    local priv
+    priv="$(docker logs --tail 200 "$GW" 2>&1 | grep -oE 'dial tcp (0|10|127|169\.254|192\.168|172\.(1[6-9]|2[0-9]|3[01])|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7]))\.[0-9.]+:[0-9]+' | head -1 || true)"
+    local now
+    now="$(docker exec "$GW" curl -fsS --max-time 3 --unix-socket /run/aibox/mihomo.sock http://mihomo/proxies/PROXY 2>/dev/null | sed -n 's/.*"now":"\([^"]*\)".*/\1/p' || true)"
+    if [ "$AIBOX_GATEWAY" = mihomo ] && [ "$now" = REJECT ]; then
+      local why="订阅下载失败或节点列表为空（aibox logs gateway 查看订阅下载错误）"
+      [ -z "${AIBOX_NODE_FILTER:-}" ] || why="节点筛选 '$AIBOX_NODE_FILTER' 没有匹配到任何节点（取消筛选: aibox config proxy --filter ''），或$why"
+      die "没有可用节点，网关已断网（不会回落直连）。
+       原因: $why"
+    fi
+    if [ -n "$priv" ]; then
+      die "节点解析到了本机/宿主机/局域网地址（${priv#dial tcp }），已被严格出口策略禁止。
+       不支持经由本地 Clash 等代理中转，请在 upstream.yaml 中使用远程节点或订阅。"
+    fi
+    die "网关不健康：请检查节点/订阅或 VPN 配置是否可用（aibox logs gateway）"
+  fi
+  fix_netns
+  local missing; missing="$(missing_tools)"
+  if [ -n "$missing" ]; then
+    info "安装 AI 工具:${missing}（流量经网关）"
+    docker exec $TTY_FLAG -e AIBOX_TOOLS="${AIBOX_TOOLS:-claude codex}" "$WS" aibox-setup || warn "部分工具安装失败，可稍后运行 aibox setup 重试"
+  fi
+  info "就绪。进入终端: ${B}aibox shell${N}   直接开始: ${B}aibox claude${N} <项目>"
+}
+
+missing_tools() {  # 输出 AIBOX_TOOLS 中容器里还没有安装的工具
+  local t out=""
+  for t in ${AIBOX_TOOLS:-claude codex}; do
+    docker exec "$WS" bash -lc "command -v $t" >/dev/null 2>&1 || out="$out $t"
+  done
+  printf '%s' "$out"
+}
+
+ensure_up() {
+  need_docker; load_env; gen_override
+  if ! is_running "$WS" || ! is_running "$GW"; then cmd_up; else fix_netns; fi
+}
+
+# 项目名 → 容器内目录。空：只有一个项目时用它，否则 /workspace
+resolve_project() {
+  local p="$1" list n
+  list="$(list_projects)"; n="$(printf '%s' "$list" | grep -c . || true)"
+  if [ -z "$p" ]; then
+    if [ "$n" = 1 ]; then echo "/workspace/$list"; else echo /workspace; fi; return
+  fi
+  case "$p" in /*) echo "$p"; return ;; esac
+  if printf '%s\n' "$list" | grep -qxF "${p%%/*}"; then echo "/workspace/$p"; return; fi
+  die "未找到项目: ${p}。已授权的项目: $(printf '%s' "$list" | paste -sd' ' - | grep . || echo 无)（aibox mounts add rw <路径> 添加）"
+}
+session_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_'; }
+
+cmd_shell() {
+  local arg="" raw=0 dir=/workspace session=main
+  while [ $# -gt 0 ]; do
+    case "$1" in --bash|--no-tmux) raw=1 ;; -*) die "未知参数 $1" ;; *) arg="$1" ;; esac; shift
+  done
+  ensure_up
+  if [ -n "$arg" ]; then
+    if list_projects | grep -qxF "${arg%%/*}"; then dir="/workspace/$arg"; fi
+    session="$(session_name "$arg")"
+  fi
+  local env=(-e TERM=xterm-256color -e COLORTERM=truecolor -w "$dir")
+  if [ "$raw" = 1 ]; then exec docker exec $TTY_FLAG "${env[@]}" "$WS" bash -l; fi
+  exec docker exec $TTY_FLAG "${env[@]}" "$WS" tmux new-session -A -s "$session" -c "$dir"
+}
+
+# 快捷启动 AI agent：在项目目录中、以独立 tmux 会话运行；会话已存在则直接恢复
+cmd_agent() {
+  local tool="$1"; shift
+  local proj="" new=0 yolo=0 args=()
+  if [ $# -gt 0 ]; then case "$1" in -*) ;; *) proj="$1"; shift ;; esac; fi
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yolo) yolo=1 ;;
+      --new)  new=1 ;;
+      --) shift; args+=("$@"); break ;;
+      *) args+=("$1") ;;
+    esac; shift
+  done
+  ensure_up
+  case " ${AIBOX_TOOLS:-claude codex} " in *" $tool "*) ;; *) warn "$tool 不在 AIBOX_TOOLS 中，如未安装请运行: aibox config set AIBOX_TOOLS \"${AIBOX_TOOLS:-} $tool\" && aibox setup" ;; esac
+  if [ "$yolo" = 1 ]; then   # 容器即沙箱：跳过工具自身的逐条确认
+    case "$tool" in
+      claude) args=(--dangerously-skip-permissions ${args[@]+"${args[@]}"}) ;;
+      codex)  args=(--dangerously-bypass-approvals-and-sandbox ${args[@]+"${args[@]}"}) ;;
+      gemini) args=(--yolo ${args[@]+"${args[@]}"}) ;;
+    esac
+  fi
+  local dir sess; dir="$(resolve_project "$proj")"
+  sess="$(session_name "$tool-${proj:-$(basename "$dir")}")"
+  if [ "$new" = 1 ]; then sess="$sess-$(date +%H%M%S)"; fi
+  if docker exec "$WS" tmux has-session -t "=$sess" 2>/dev/null; then
+    info "恢复会话 ${sess}（新开一个: 加 --new）"
+  else
+    info "在 $dir 启动 ${tool}（会话 ${sess}；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）"
+  fi
+  exec docker exec $TTY_FLAG -e TERM=xterm-256color -e COLORTERM=truecolor -w "$dir" "$WS" \
+    tmux new-session -A -s "$sess" -c "$dir" -n "$tool" \
+    bash -lc '"$@"; echo; echo "[$1 已退出，当前为普通 shell；exit 关闭会话]"; exec bash -l' _ "$tool" ${args[@]+"${args[@]}"}
+}
+
+cmd_exec() {
+  [ $# -gt 0 ] || die "用法: aibox exec <命令> [参数...]"
+  ensure_up
+  exec docker exec $TTY_FLAG -e TERM=xterm-256color -w /workspace "$WS" "$@"
+}
+
+cmd_sessions() {
+  ensure_up
+  docker exec "$WS" tmux ls -F '#{session_name}  #{?session_attached,(已连接),}  窗口:#{session_windows}  创建于 #{t:session_created}' 2>/dev/null || echo "没有运行中的会话"
+}
+
+cmd_stop()    { need_docker; load_env; gen_override; compose stop; info "已停止（数据保留）"; }
+cmd_down()    { need_docker; load_env; gen_override; compose down; info "容器已删除（home 卷与配置保留）"; }
+cmd_restart() { need_docker; load_env; gen_override; compose stop; cmd_up; }
+cmd_logs() {   # 终端中持续跟随；非终端（agent / 脚本）只输出最近日志后退出
+  need_docker; load_env; gen_override
+  local follow=(); [ -t 1 ] && follow=(-f)
+  compose logs ${follow[@]+"${follow[@]}"} --tail=200 "$@"
+}
+cmd_setup()   { ensure_up; docker exec $TTY_FLAG -e AIBOX_TOOLS="${AIBOX_TOOLS:-claude codex}" "$WS" aibox-setup "$@"; }
+
+cmd_rebuild() {
+  need_docker; load_env; gen_override
+  info "重新构建镜像（拉取最新基础镜像）"
+  compose build --pull "$@"
+  compose up -d --force-recreate --wait --wait-timeout "${AIBOX_WAIT_TIMEOUT:-180}"
+  info "完成（home 卷中的配置与 AI 工具保留）"
+}
+
+cmd_status() {
+  need_docker; load_env; gen_override
+  compose ps
+  echo
+  echo "网关: $AIBOX_GATEWAY  健康: $(health "$GW")"
+  if is_running "$WS"; then
+    echo "出口 IP: $(dexec 'curl -4 -fsS --max-time 8 https://api.ipify.org' 2>/dev/null || echo '获取失败')"
+    echo "会话:"; docker exec "$WS" tmux ls -F '  #{session_name}' 2>/dev/null || echo "  （无）"
+  fi
+}
+
+cmd_mounts() {
+  local sub="${1:-}"; [ $# -gt 0 ] && shift
+  case "$sub" in
+    add)
+      [ $# -ge 1 ] || die "用法: aibox mounts add [rw|ro] <路径> [-> 容器内名字]"
+      local mode=rw; case "$1" in rw|ro) mode="$1"; shift ;; esac
+      [ $# -ge 1 ] || die "缺少路径"
+      local p="$1" t=""; shift
+      if [ "${1:-}" = "->" ]; then t="${2:-}"; fi
+      copy_examples >/dev/null; mounts_add "$mode" "$p" "$t" || exit 1
+      echo "执行 aibox up 生效" ;;
+    rm|remove|del)
+      [ $# -ge 1 ] || die "用法: aibox mounts rm <项目名|路径>"
+      mounts_rm "$1" || exit 1; echo "执行 aibox up 生效" ;;
+    ''|ls|list) list_mounts_raw ;;
+    *) die "用法: aibox mounts [list | add [rw|ro] <路径> | rm <项目名|路径>]" ;;
+  esac
+}
+
+cmd_destroy() {
+  need_docker; load_env; gen_override
+  printf '将删除容器、镜像和持久化数据（home 卷：AI 工具登录状态、shell 历史等）。宿主机项目文件不受影响。\n输入 yes 确认: '
+  local a; read -r a; [ "$a" = yes ] || die "已取消"
+  compose down -v --rmi local
+  info "已清除"
+}
+
+# 安装到 PATH：aibox 与短命令（默认 ai），并可选添加 Tab 补全
+cmd_install() {
+  local short="${1:-ai}" dir="" d SUDO="" add_path=0
+  # 优先选：在 PATH 中、已存在、当前用户可写的目录
+  for d in "$USER_HOME/.local/bin" /opt/homebrew/bin /usr/local/bin; do
+    case ":$PATH:" in *":$d:"*) [ -d "$d" ] && [ -w "$d" ] && { dir="$d"; break; } ;; esac
+  done
+  # 其次：/usr/local/bin 存在但需要管理员权限（Apple Silicon Mac 上它常常不存在，不能选）
+  if [ -z "$dir" ] && [ -d /usr/local/bin ]; then
+    case ":$PATH:" in *":/usr/local/bin:"*) dir=/usr/local/bin; SUDO=sudo ;; esac
+  fi
+  # 最后：~/.local/bin，并把它加入 PATH
+  if [ -z "$dir" ]; then
+    dir="$USER_HOME/.local/bin"; mkdir -p "$dir"; fix_owner "$dir"
+    case ":$PATH:" in *":$dir:"*) ;; *) add_path=1 ;; esac
+  fi
+  $SUDO ln -sf "$ROOT/aibox" "$dir/aibox" || die "无法写入 $dir"; echo "  已安装: $dir/aibox"
+  if [ "$short" != none ]; then
+    local existing; existing="$(command -v "$short" 2>/dev/null || true)"
+    if [ -n "$existing" ] && [ "$(readlink "$existing" 2>/dev/null)" != "$ROOT/aibox" ]; then
+      warn "短命令 $short 已被占用（${existing}），未覆盖。可指定其它名字: aibox install <名字>"
+    else
+      $SUDO ln -sf "$ROOT/aibox" "$dir/$short"; echo "  已安装: $dir/${short}（aibox 的简写）"
+    fi
+  fi
+
+  # shell 配置文件：zsh → ~/.zshrc；macOS 上的 bash 终端是登录 shell，读 ~/.bash_profile
+  local shell_name rc
+  case "$(basename "${SHELL:-bash}")" in zsh) shell_name=zsh; rc="$USER_HOME/.zshrc" ;; *) shell_name=bash; rc="$USER_HOME/.bashrc" ;; esac
+  [ "$shell_name" = bash ] && [ "$HOST_OS" = macos ] && rc="$USER_HOME/.bash_profile"
+  if [ "$add_path" = 1 ]; then
+    if [ -t 0 ] && yesno "$dir 不在 PATH 中，添加到 ${rc}？" y; then
+      printf '\n# aibox\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"; fix_owner "$rc"; echo "  已添加，新开终端生效"
+    else
+      warn "$dir 不在 PATH 中，请把它加入 PATH: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
+  fi
+  if [ -t 0 ] && ! grep -q 'aibox completion' "$rc" 2>/dev/null; then
+    if yesno "添加 Tab 补全到 ${rc}？" y; then
+      printf '\n# aibox Tab 补全\ncommand -v aibox >/dev/null 2>&1 && eval "$(aibox completion %s)"\n' "$shell_name" >> "$rc"
+      fix_owner "$rc"; echo "  已添加，新开终端生效"
+    fi
+  fi
+}
+
+cmd_completion() {
+  local cmds="init import config up shell claude codex gemini opencode sessions exec stop restart down status doctor mounts logs setup rebuild guide install destroy help"
+  case "${1:-bash}" in
+    zsh) cat <<EOF
+# macOS 自带的 zsh 默认没有启用补全系统；没有 compdef 时先初始化
+(( \$+functions[compdef] )) || { autoload -Uz compinit && compinit -i; }
+_aibox() {
+  local -a cmds; cmds=(${cmds})
+  if (( CURRENT == 2 )); then compadd -a cmds; return; fi
+  case \$words[2] in
+    claude|codex|gemini|opencode|shell|c|x|cx|s) (( CURRENT == 3 )) && compadd -- \$(aibox projects 2>/dev/null) ;;
+    mounts) (( CURRENT == 3 )) && compadd list add rm ;;
+    config) (( CURRENT == 3 )) && compadd show check set get edit proxy vpn network mounts tools ports key help ;;
+    logs) compadd gateway workspace ;;
+  esac
+}
+compdef _aibox aibox ai
+EOF
+    ;;
+    bash) cat <<EOF
+_aibox() {
+  local cur=\${COMP_WORDS[COMP_CWORD]}
+  if [ \$COMP_CWORD -eq 1 ]; then COMPREPLY=(\$(compgen -W "${cmds}" -- "\$cur")); return; fi
+  case \${COMP_WORDS[1]} in
+    claude|codex|gemini|opencode|shell|c|x|cx|s) [ \$COMP_CWORD -eq 2 ] && COMPREPLY=(\$(compgen -W "\$(aibox projects 2>/dev/null)" -- "\$cur")) ;;
+    mounts) COMPREPLY=(\$(compgen -W "list add rm" -- "\$cur")) ;;
+    config) COMPREPLY=(\$(compgen -W "show check set get edit proxy vpn network mounts tools ports key help" -- "\$cur")) ;;
+    logs) COMPREPLY=(\$(compgen -W "gateway workspace" -- "\$cur")) ;;
+  esac
+}
+complete -F _aibox aibox ai
+EOF
+    ;;
+    *) die "用法: aibox completion bash|zsh" ;;
+  esac
+}
+
+cmd_guide() {
+  local f="$ROOT/docs/GUIDE.md"
+  [ -f "$f" ] || die "找不到 $f"
+  if [ -t 1 ] && command -v less >/dev/null 2>&1; then less -R "$f"; else cat "$f"; fi
+}
+
+# ---------- 体检：宿主机 / 出口 / IPv6 / DNS / 防火墙 / 断线阻断 / 挂载权限 ----------
+PASS=0; FAIL=0
+ok()  { PASS=$((PASS + 1)); echo "  ${G}✔${N} $*"; }
+bad() { FAIL=$((FAIL + 1)); echo "  ${R}✘${N} $*"; }
+
+cmd_doctor() {
+  local full=0; [ "${1:-}" = "--full" ] && full=1
+  ensure_up
+  echo "${B}宿主机${N}"
+  ok "系统: $HOST_OS  Docker $(docker version -f '{{.Server.Version}}')  Compose $(docker compose version --short)"
+  if selinux_enforcing; then
+    [ "${AIBOX_SELINUX_RELABEL:-}" = 1 ] && ok "SELinux Enforcing，已启用挂载标签" || bad "SELinux Enforcing 但未启用 AIBOX_SELINUX_RELABEL"
+  fi
+  echo "${B}容器${N}"
+  [ "$(health "$GW")" = healthy ] && ok "网关健康" || bad "网关状态: $(health "$GW")"
+  is_running "$WS" && ok "workspace 运行中" || bad "workspace 未运行"
+
+  echo "${B}出口${N}"
+  local wip hip
+  wip="$(dexec 'curl -4 -fsS --max-time 10 https://ipinfo.io/json | jq -r "\"\(.ip) \(.country) \(.org)\""' 2>/dev/null || true)"
+  [ -n "$wip" ] || wip="$(dexec 'curl -4 -fsS --max-time 10 https://api.ipify.org' 2>/dev/null || true)"
+  hip="$(curl -4 -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
+  if [ -n "$wip" ]; then ok "容器出口: $wip"; else bad "容器无法联网"; fi
+  [ -n "$hip" ] && echo "    宿主机出口: $hip"
+  if [ -n "$wip" ] && [ -n "$hip" ] && [ "${wip%% *}" = "$hip" ]; then
+    warn "容器出口与宿主机相同：若宿主机没有开全局 VPN，说明代理/VPN 服务器就在本机网络中，请检查出口配置"
+  fi
+
+  echo "${B}IPv6${N}"
+  if dexec 'curl -6 -fsS --max-time 5 https://api6.ipify.org' >/dev/null 2>&1; then bad "IPv6 可以出网（存在泄漏风险）"; else ok "IPv6 出网被阻断"; fi
+  [ -z "$(dexec 'ip -6 addr show scope global 2>/dev/null')" ] && ok "无全局 IPv6 地址" || bad "存在全局 IPv6 地址"
+
+  echo "${B}DNS${N}"
+  local ns dns
+  ns="$(dexec "awk '/^nameserver/{print \$2}' /etc/resolv.conf | paste -sd' ' -")"
+  case "$ns" in 127.0.0.1) ok "resolv.conf 指向网关本地 DNS ($ns)" ;; *) bad "resolv.conf: $ns" ;; esac
+  if [ "$AIBOX_GATEWAY" = mihomo ]; then
+    dns="$(dexec 'getent ahostsv4 example.com | awk "NR==1{print \$1}"' 2>/dev/null || true)"
+    case "$dns" in 198.18.*) ok "域名解析由网关接管（fake-ip，真实解析在代理远端完成）" ;; *) bad "域名解析结果异常: ${dns:-失败}" ;; esac
+    dns="$(dexec 'dig +short +time=3 +tries=1 @8.8.8.8 example.com A | tail -1' 2>/dev/null || true)"
+    case "$dns" in 198.18.*) ok "程序硬编码外部 DNS(@8.8.8.8) 也被劫持到网关" ;; *) bad "硬编码 DNS 未被劫持: ${dns:-失败}" ;; esac
+  fi
+  dns="$(dexec 'dig +short +time=5 +tries=1 TXT o-o.myaddr.l.google.com | tr -d "\"" | paste -sd" " -' 2>/dev/null || true)"
+  if [ -n "$dns" ]; then ok "Google 权威 DNS 看到的查询来源: $dns"; echo "    （edns0-client-subnet 应为代理/VPN 出口网段，而不是本地运营商）"
+  else bad "DNS 查询失败"; fi
+
+  echo "${B}隔离${N}"
+  local cap; cap="$(dexec "awk '/^CapBnd/{print \$2}' /proc/self/status")"
+  if [ $((0x$cap & 0x203000)) -eq 0 ]; then ok "workspace 无 NET_ADMIN / NET_RAW / SYS_ADMIN（root 也改不了网络）"; else bad "workspace 能力集过大: $cap"; fi
+  if [ "$AIBOX_GATEWAY" = mihomo ]; then
+    if docker exec "$GW" curl -fsS -o /dev/null --max-time 4 --interface eth0 http://1.1.1.1 >/dev/null 2>&1; then
+      bad "绕过 TUN 直连物理网卡成功（防火墙失效！）"
+    else ok "绕过隧道直连物理网卡被防火墙拒绝"; fi
+    if docker exec "$GW" sh -c 'iptables -S AIBOX_UPSTREAM 2>/dev/null || iptables-legacy -S AIBOX_UPSTREAM' 2>/dev/null | grep -q '192.168.0.0/16'; then
+      ok "上游只允许公网节点（宿主机 Clash / 局域网代理被防火墙禁止）"
+    else bad "缺少上游地址限制规则"; fi
+    local now; now="$(docker exec "$GW" curl -fsS --max-time 3 --unix-socket /run/aibox/mihomo.sock http://mihomo/proxies/PROXY 2>/dev/null | sed -n 's/.*"now":"\([^"]*\)".*/\1/p' || true)"
+    case "$now" in ''|REJECT|REJECT-DROP|DIRECT|COMPATIBLE|PASS) bad "PROXY 组没有真实节点（当前: ${now:-未知}）" ;;
+      *) ok "当前节点: ${now}（组内无节点时为 REJECT 断网，不会回落直连）" ;; esac
+    if docker exec "$GW" test -S /run/aibox/mihomo.sock && ! dexec 'curl -fsS --max-time 2 http://127.0.0.1:9090' >/dev/null 2>&1; then
+      ok "mihomo 控制接口对 workspace 不可见"
+    else bad "mihomo 控制接口检查失败"; fi
+  fi
+
+  if [ "$full" = 1 ]; then
+    echo "${B}断线阻断（模拟隧道断开）${N}"
+    if [ "$AIBOX_GATEWAY" = mihomo ]; then
+      docker exec "$GW" sh -c 'touch /run/aibox/hold; pkill -x mihomo' || true   # 代理进程崩溃
+    else
+      docker exec "$GW" ip link set "${VPN_INTERFACE:-tun0}" down || true        # VPN 网卡掉线
+    fi
+    sleep 2
+    if dexec 'curl -4 -fsS -o /dev/null --max-time 5 https://api.ipify.org' >/dev/null 2>&1; then bad "隧道断开后仍能联网（泄漏！）"; else ok "隧道断开后流量被完全阻断"; fi
+    if dexec 'curl -4 -fsS -o /dev/null --max-time 5 http://1.1.1.1' >/dev/null 2>&1; then bad "隧道断开后可直连 IP（泄漏！）"; else ok "隧道断开后直连 IP 同样被阻断"; fi
+    [ "$AIBOX_GATEWAY" = mihomo ] && docker exec "$GW" rm -f /run/aibox/hold
+    local i=0
+    until dexec 'curl -4 -fsS -o /dev/null --max-time 5 https://api.ipify.org' >/dev/null 2>&1; do
+      i=$((i + 1)); [ $i -lt 40 ] || { bad "隧道未能自动恢复（aibox restart）"; break; }; sleep 2
+    done
+    [ $i -lt 40 ] && ok "隧道恢复后自动重新联网（约 $((i * 2 + 2)) 秒）"
+  fi
+
+  echo "${B}挂载${N}"
+  if [ -z "$MOUNT_LIST" ]; then echo "  （未授权任何目录）"; fi
+  local m h t w
+  while IFS=$'\t' read -r m h t; do
+    [ -n "$m" ] || continue
+    if ! docker exec "$WS" test -e "$t"; then bad "$t 不存在"; continue; fi
+    if docker exec "$WS" test -w "$t"; then w=rw; else w=ro; fi
+    [ "$w" = "$m" ] && ok "$t ($m)" || bad "$t 期望 ${m}，实际 ${w}（rw 不可写时检查宿主机权限/UID/SELinux）"
+  done <<EOF
+$MOUNT_LIST
+EOF
+  echo
+  if [ "$FAIL" -eq 0 ]; then echo "${G}${B}全部通过${N} ($PASS 项)"; else echo "${R}${B}$FAIL 项失败${N}, $PASS 项通过"; exit 1; fi
+}
+
+usage() {
+  cat <<EOF
+${B}aibox${N} — Docker 中的 AI 编程终端（Claude Code / Codex），网络强制走代理/VPN
+短命令 ${B}ai${N} 与 aibox 等价（aibox install 安装）
+
+${B}开始${N}
+  init                  配置向导（首次使用）        ${D}--defaults 生成默认配置不提问${N}
+  config                交互式修改配置；带参数时为非交互（agent / 脚本），见 aibox config help
+  up                    启动（首次构建镜像并安装 AI 工具）
+  guide                 配置与使用指南（人和 agent 通用）
+
+${B}一键导入出口${N}（自动识别订阅、v2rayN/Shadowrocket 分享链接、clash:// 导入链接、Base64）
+  import "<链接>" [更多链接…] [--filter 正则]   pbpaste | aibox import -   （简写 i）
+
+${B}非交互配置${N}（不提问，失败返回非 0 且不改动原配置）
+  config proxy --sub <订阅链接> [--filter 正则]     config vpn --wireguard <wg0.conf>
+  mounts add [rw|ro] <路径>    mounts rm <名字>     config tools claude codex
+  config ports 3000,5173       config key <变量名>（值从标准输入读取）
+  config check                 config show           config set AIBOX_<键> <值>
+
+${B}日常${N}                                                    ${D}简写${N}
+  claude [项目] [参数]  在项目目录启动 Claude Code（独立会话，可恢复）   c
+  codex  [项目] [参数]  在项目目录启动 Codex                              x
+        --yolo          跳过逐条确认（容器即沙箱）   --new  新开会话而不是恢复
+  shell  [项目]         进入终端（tmux；断开后可恢复）  --bash 不用 tmux   s
+  sessions              列出所有会话                                      ls
+  exec <命令...>        在容器中执行一条命令
+  status                状态、出口 IP、会话                               st
+  stop | restart        停止 / 重启（数据保留）                           q
+
+${B}管理${N}
+  mounts [add|rm]       授权目录: aibox mounts add ro ~/docs | aibox mounts rm docs
+  doctor [--full]       网络与挂载体检（--full 含断线阻断测试）           d
+  logs [gateway|workspace]   setup [--upgrade]   rebuild   down   destroy
+  install [短命令名]    安装到 PATH（默认短命令 ai）并添加 Tab 补全
+EOF
+}
+
+cmd="${1:-help}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  init) cmd_init "$@" ;;
+  config|cfg) cmd_config "$@" ;;
+  import|i) cmd_config proxy "$@" ;;
+  up|start|u) cmd_up "$@" ;;
+  shell|enter|sh|s) cmd_shell "$@" ;;
+  claude|c) cmd_agent claude "$@" ;;
+  codex|x|cx) cmd_agent codex "$@" ;;
+  gemini) cmd_agent gemini "$@" ;;
+  opencode) cmd_agent opencode "$@" ;;
+  sessions|ls) cmd_sessions ;;
+  exec|run) cmd_exec "$@" ;;
+  stop|q) cmd_stop ;;
+  restart) cmd_restart ;;
+  down) cmd_down ;;
+  status|ps|st) cmd_status ;;
+  doctor|check|d) cmd_doctor "$@" ;;
+  mounts|mount) cmd_mounts "$@" ;;
+  projects) list_projects ;;
+  logs|l) cmd_logs "$@" ;;
+  setup) cmd_setup "$@" ;;
+  rebuild|update) cmd_rebuild "$@" ;;
+  install) cmd_install "$@" ;;
+  completion) cmd_completion "$@" ;;
+  guide|tutorial) cmd_guide ;;
+  destroy) cmd_destroy ;;
+  help|-h|--help) usage ;;
+  *) usage; exit 1 ;;
+esac

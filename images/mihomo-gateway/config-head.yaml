@@ -1,0 +1,38 @@
+# 由 entrypoint 生成，请勿直接修改。用户只需编辑 config/mihomo/upstream.yaml
+mode: rule
+log-level: __LOG_LEVEL__
+ipv6: false
+allow-lan: false
+unified-delay: true
+geo-auto-update: false
+# mihomo 自身的出站连接打上此标记；防火墙只放行带标记的物理网卡流量
+routing-mark: __MARK__
+# 控制接口只走 unix socket（位于网关容器内），workspace 无法访问、无法切换到直连
+external-controller-unix: /run/aibox/mihomo.sock
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+tun:
+  enable: true
+  stack: mixed
+  device: __TUN__
+  auto-route: true
+  auto-detect-interface: true
+  strict-route: true
+  dns-hijack:
+    - any:53
+    - tcp://any:53
+
+dns:
+  enable: true
+  listen: 127.0.0.1:53
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  use-hosts: true
+  use-system-hosts: true
+  # 仅用于解析“代理服务器自身的域名”（必须直连）
+  proxy-server-nameserver: [__PROXY_SERVER_DNS__]
+  # 其它所有解析都经代理隧道完成（#PROXY），ISP 看不到任何 DNS 查询
+  nameserver: [__DNS__]

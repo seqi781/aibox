@@ -1,0 +1,7 @@
+#!/bin/bash
+# 修正持久化 home 的归属（例如换了宿主机 UID 后重建镜像）
+if [ "$(stat -c %u "$HOME")" != "$(id -u)" ]; then
+  sudo chown -R "$(id -u):$(id -g)" "$HOME"
+fi
+mkdir -p "$HOME/.npm-global" "$HOME/.local/bin"
+exec "$@"

@@ -1,0 +1,25 @@
+# VPN 模式网关：gluetun（WireGuard / OpenVPN，内置 kill switch、DNS over TLS、IPv6 阻断）
+# 配置写在 config/gluetun.env，参考 https://github.com/qdm12/gluetun-wiki
+services:
+  gateway:
+    image: qmcgaw/gluetun:${AIBOX_GLUETUN_VERSION:-v3.41.3}
+    container_name: aibox-gateway
+    hostname: aibox
+    cap_add: [NET_ADMIN]
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
+    env_file:
+      - path: ./config/gluetun.env
+        required: true
+    environment:
+      TZ: ${AIBOX_TZ:-UTC}
+      FIREWALL_INPUT_PORTS: ${AIBOX_INPUT_PORTS:-}
+      FIREWALL_OUTBOUND_SUBNETS: ${AIBOX_ALLOW_DIRECT_CIDRS:-}
+      HTTPPROXY: "off"
+      SHADOWSOCKS: "off"
+    volumes:
+      - ./config/gluetun:/gluetun
+    restart: unless-stopped

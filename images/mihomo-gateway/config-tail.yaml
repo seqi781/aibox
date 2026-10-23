@@ -1,0 +1,20 @@
+
+# ---- aibox 强制出口策略：所有应用流量 → PROXY 组 ----
+proxy-groups:
+  - name: PROXY
+    type: __GROUP_TYPE__
+    include-all: true
+    # 硬性排除直连/拒绝类节点，即使订阅里混入也不会被选中
+    exclude-type: "Direct|Reject|RejectDrop|Pass|Compatible|Dns"
+    # 关键：组内没有节点时（筛选无匹配、订阅下载失败），mihomo 默认回落到 COMPATIBLE，
+    # 它等同于直连。改为 REJECT：没有节点就断网
+    empty-fallback: REJECT
+    url: __TEST_URL__
+    interval: 300
+    lazy: false
+__FILTER_LINE__
+rules:
+  # 仅 mihomo 自身发起的请求（下载订阅）直连；防火墙仍只允许它连公网地址。
+  # 应用流量一律从 TUN 进入，不会匹配此规则
+  - IN-TYPE,INNER,DIRECT
+  - MATCH,PROXY

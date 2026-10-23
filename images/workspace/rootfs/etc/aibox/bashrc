@@ -1,0 +1,27 @@
+# aibox 全局交互式 shell 配置（位于镜像中，随镜像更新；个人配置请写 ~/.bashrc）
+[ -z "${PS1:-}" ] && return
+
+HISTSIZE=100000
+HISTFILESIZE=200000
+HISTCONTROL=ignoreboth:erasedups
+shopt -s histappend checkwinsize
+PROMPT_COMMAND="history -a${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+
+[ -f /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion
+
+alias ll='ls -alF --color=auto' la='ls -A --color=auto' ls='ls --color=auto' grep='grep --color=auto'
+
+__aibox_ps1_git() { local b; b=$(git symbolic-ref --short HEAD 2>/dev/null) && printf ' (%s)' "$b"; }
+PS1='\[\e[35m\][aibox]\[\e[0m\] \[\e[32m\]\u\[\e[0m\]:\[\e[34m\]\w\[\e[33m\]$(__aibox_ps1_git)\[\e[0m\]\$ '
+
+# 新开的终端窗口显示欢迎信息（子 shell 不重复）
+if [ -z "${AIBOX_WELCOMED:-}" ]; then
+  export AIBOX_WELCOMED=1
+  echo -e "\e[35maibox\e[0m 网关: ${AIBOX_GATEWAY:-?} | 项目目录: /workspace | 命令: claude, codex, tmux"
+  if [ -n "${AIBOX_MOUNTS:-}" ]; then
+    echo "$AIBOX_MOUNTS" | tr ';' '\n' | sed '/^$/d; s/^/  挂载 /'
+  else
+    echo "  (未挂载任何宿主机目录，编辑 config/mounts.conf 后执行 aibox up)"
+  fi
+  [ -f "$HOME/.cache/aibox-setup.done" ] || echo "  AI 工具尚未安装：运行 aibox-setup"
+fi

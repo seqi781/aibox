@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aibox — an isolated terminal for AI coding agents, in Docker</title>
+<meta name="description" content="aibox runs Claude Code, Codex and other AI coding tools in Docker. All traffic is forced through the proxy node or VPN you choose, with a kill switch; only the folders you grant are visible to the AI. macOS and Linux.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0a09" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://SITE_DOMAIN/en/">
+<link rel="alternate" hreflang="zh-CN" href="https://SITE_DOMAIN/">
+<link rel="alternate" hreflang="en" href="https://SITE_DOMAIN/en/">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="aibox">
+<meta property="og:title" content="aibox — an isolated terminal for AI coding agents, in Docker">
+<meta property="og:description" content="Egress pinned to your proxy or VPN, cut off when the tunnel drops. Only the folders you grant are visible. Two containers, no VM.">
+<meta property="og:url" content="https://SITE_DOMAIN/en/">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<!-- Uncomment after exporting og.png (1200×630, source: og.svg) -->
+<!-- <meta property="og:image" content="https://SITE_DOMAIN/og.png"> -->
+<!-- <meta name="twitter:card" content="summary_large_image"> -->
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hdr">
+  <div class="shell bar">
+    <a class="logo" href="./" aria-label="aibox home"><i aria-hidden="true"></i>aibox</a>
+    <nav class="links" aria-label="Page sections">
+      <a href="#why">Why</a>
+      <a href="#how">How it works</a>
+      <a href="#compare">Compare</a>
+      <a href="#start">Get started</a>
+      <a href="#agents">For agents</a>
+      <a href="#doctor">Doctor</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="hdr-r">
+      <a class="lang" href="../" hreflang="zh-CN" lang="zh-CN">中文</a>
+      <a class="hdr-cta" href="https://github.com/OWNER/aibox">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="shell hero-grid">
+    <div>
+      <p class="eyebrow">AI CODING TERMINAL · DOCKER</p>
+      <h1 id="hero-title">Give the AI a terminal,<br>you set the walls.</h1>
+      <p class="sub">aibox runs Claude Code, Codex and other AI coding tools inside Docker. <b>Every packet goes through the proxy node or VPN you choose, and if the tunnel drops, so does the network.</b> <b>Only the folders you grant are visible.</b> Your host's network settings stay untouched.</p>
+      <div class="btns">
+        <a class="btn p" href="#start">Get started</a>
+        <a class="btn g" href="https://github.com/OWNER/aibox">GitHub</a>
+      </div>
+      <ul class="hero-meta" aria-label="Overview">
+        <li>macOS · Linux</li>
+        <li>Windows via WSL2</li>
+        <li>Two containers, no VM</li>
+      </ul>
+    </div>
+
+    <figure class="term" style="margin:0">
+      <div class="term-bar">
+        <span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>~/aibox</span>
+        <span class="tag">Illustrative · documentation IPs</span>
+      </div>
+      <pre id="demo" style="white-space:pre-wrap" aria-label="Terminal demo: check status, start Claude Code in project myapp, detach while it keeps running"><span class="ps">$ </span><span class="cm">ai st</span>
+<span class="d">(docker compose ps output omitted)</span>
+网关: mihomo  健康: <span class="ok">healthy</span>
+出口 IP: 203.0.113.24
+会话:
+  （无）
+<span class="ps">$ </span><span class="cm">ai c myapp</span>
+<span class="ok">==&gt;</span> 在 /workspace/myapp 启动 claude（会话 claude-myapp；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）
+<span class="d">    … Claude Code working inside tmux (UI omitted) …</span>
+<span class="d">    [Ctrl+b d to detach; the task keeps running]</span>
+<span class="ps">$ </span><span class="cm">ai ls</span>
+claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
+</pre>
+      <figcaption class="term-foot">
+        <span>The CLI currently prints Chinese · ai c = aibox claude</span>
+        <button class="mini" type="button" id="demo-replay">Replay</button>
+      </figcaption>
+    </figure>
+    <script type="application/json" id="demo-script">[
+      {"cmd": "ai st"},
+      {"out": "(docker compose ps output omitted)", "cls": "d"},
+      {"out": "网关: mihomo  健康: healthy"},
+      {"out": "出口 IP: 203.0.113.24"},
+      {"out": "会话:"},
+      {"out": "  （无）", "wait": 700},
+      {"cmd": "ai c myapp"},
+      {"out": "==> 在 /workspace/myapp 启动 claude（会话 claude-myapp；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）", "wait": 700},
+      {"out": "    … Claude Code working inside tmux (UI omitted) …", "cls": "d", "wait": 1200},
+      {"out": "    [Ctrl+b d to detach; the task keeps running]", "cls": "d", "wait": 700},
+      {"cmd": "ai ls"},
+      {"out": "claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026"}
+    ]</script>
+  </div>
+</section>
+
+<section class="sec alt" id="why" aria-labelledby="why-title">
+  <div class="shell">
+    <p class="eyebrow">WHY AIBOX</p>
+    <h2 class="h2" id="why-title">Six common worries,<br>six concrete answers.</h2>
+    <p class="lede">Letting an AI write code and run commands on your own machine tends to raise the same handful of concerns. aibox answers each one with a concrete mechanism.</p>
+
+    <div class="feats sec-body">
+      <article>
+        <p class="q">01 / FILES</p>
+        <p class="worry"><span>Will the agent wander into <code>~/.ssh</code> or my other projects?</span></p>
+        <h3>It only sees folders you grant</h3>
+        <p>List folders one by one, each read-only (ro) or read-write (rw), mounted under <code>/workspace</code>. ro is enforced by the kernel, so even root inside the container can't write. Mounting your whole home directory, <code>/</code>, credential folders such as <code>~/.ssh</code>, the Docker socket, or aibox's own folder (so the AI can't rewrite the gateway config) is refused by default.</p>
+      </article>
+      <article>
+        <p class="q">02 / COMMANDS</p>
+        <p class="worry"><span>Could the commands it runs change things on my machine?</span></p>
+        <h3>Commands run in a container</h3>
+        <p>Claude Code and Codex run in the workspace container and can't see host processes or other files. It drops NET_ADMIN, NET_RAW and SYS_ADMIN, doesn't mount the Docker socket, and isn't privileged.</p>
+      </article>
+      <article>
+        <p class="q">03 / EGRESS</p>
+        <p class="worry"><span>Will split-routing rules send some traffic direct? What about DNS and IPv6?</span></p>
+        <h3>One way out, everything else denied</h3>
+        <p>The gateway firewall defaults to deny, and app traffic has exactly one rule: everything through the proxy. If the node filter matches nothing or the subscription fails to download, the gateway goes offline instead of falling back to a direct connection. DNS resolves at the gateway and goes through the tunnel; even a hard-coded 8.8.8.8 is intercepted. IPv6 is disabled outright.</p>
+      </article>
+      <article>
+        <p class="q">04 / KILL SWITCH</p>
+        <p class="worry"><span>If the proxy drops, does traffic fall back to my normal connection?</span></p>
+        <h3>No tunnel, no network</h3>
+        <p>When the proxy process crashes or the VPN disconnects, traffic is blocked rather than leaking out directly. mihomo is restarted automatically and gluetun reconnects on its own; the workspace keeps running.</p>
+      </article>
+      <article>
+        <p class="q">05 / HOST NETWORK</p>
+        <p class="worry"><span>I don't want to change my whole machine's network setup.</span></p>
+        <h3>Your host network stays as is</h3>
+        <p>Every firewall rule lives in the container's own network namespace. Your browser, system proxy and other apps keep using the network they always did.</p>
+      </article>
+      <article>
+        <p class="q">06 / WEIGHT</p>
+        <p class="worry"><span>Do I need a full virtual machine for this kind of isolation?</span></p>
+        <h3>Two containers, a real terminal</h3>
+        <p>No extra VM. You get bash, tmux, git, node, python and a build toolchain — not a toy sandbox. tmux sessions persist, so tasks keep running after you close the terminal or drop SSH.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="how" aria-labelledby="how-title">
+  <div class="shell">
+    <p class="eyebrow">HOW IT WORKS</p>
+    <h2 class="h2" id="how-title">One path out,<br>every other path denied.</h2>
+    <p class="lede">The gateway container owns the network stack. The workspace container has no network interface of its own; it shares the gateway's network namespace and can only leave through it. All network-admin privileges live in the gateway — the container the AI runs in has none.</p>
+
+    <figure class="diagram sec-body">
+      <div class="diagram-scroll">
+        <svg viewBox="0 0 1000 560" role="img" aria-labelledby="arch-t arch-d">
+          <title id="arch-t">aibox architecture</title>
+          <desc id="arch-d">On the host, granted folders are mounted read-only or read-write into the workspace container; folders like ~/.ssh that are not granted are invisible. The workspace container has no network interface and drops NET_ADMIN, NET_RAW and SYS_ADMIN. It shares a network namespace with the gateway container, which receives all traffic. The gateway runs mihomo (TUN) or gluetun, with iptables default-deny, DNS resolved through the tunnel and IPv6 disabled. Traffic can only leave through an encrypted tunnel to a remote node or VPN server, then to the internet. Blocked paths: going direct via the physical interface, using a proxy on the host such as Clash as upstream, Docker's built-in DNS 127.0.0.11, and IPv6.</desc>
+          <defs>
+            <marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ar-a" d="M0 0L10 5L0 10z"/></marker>
+          </defs>
+
+          <rect class="box" x="1" y="24" width="712" height="520"/>
+          <text class="t-m" x="20" y="52">HOST · MACOS / LINUX</text>
+          <text class="t-m" x="700" y="52" text-anchor="end">HOST NETWORK UNCHANGED</text>
+
+          <rect class="box-s" x="20" y="80" width="190" height="150"/>
+          <text class="t-h" x="34" y="106">Granted folders</text>
+          <text class="t" x="34" y="136">~/code/myapp  rw</text>
+          <text class="t" x="34" y="160">~/docs/specs  ro</text>
+          <text class="t-w" x="34" y="186">~/.ssh  not granted</text>
+          <text class="t-w" x="34" y="210">~ or /  refused</text>
+
+          <rect class="box-w" x="20" y="396" width="190" height="84"/>
+          <text class="t-h" x="34" y="424">Local proxy app</text>
+          <text class="t" x="34" y="452">127.0.0.1:7890</text>
+          <text class="t-w" x="20" y="508">× not allowed upstream</text>
+
+          <rect class="box" x="230" y="64" width="476" height="464"/>
+          <text class="t-m" x="246" y="88">DOCKER · ORBSTACK / DESKTOP / ENGINE</text>
+          <rect class="box" x="246" y="100" width="444" height="414"/>
+          <text class="t-m" x="262" y="124">SHARED NETWORK NAMESPACE</text>
+
+          <rect class="box-s" x="262" y="136" width="412" height="150"/>
+          <text class="t-h" x="278" y="162">workspace container</text>
+          <text class="t" x="278" y="188">bash · tmux · git · node · python</text>
+          <text class="t" x="278" y="211">claude / codex</text>
+          <text class="t-a" x="278" y="235">no NIC · drops NET_ADMIN / NET_RAW / SYS_ADMIN</text>
+          <text class="t" x="278" y="262">/workspace/myapp rw · /workspace/specs ro</text>
+
+          <path class="ln-a" d="M210 150 C236 150 236 200 258 200" marker-end="url(#ah-a)"/>
+
+          <path class="ln-a" d="M468 286 L468 322" marker-end="url(#ah-a)"/>
+          <text class="t-a" x="480" y="310">all traffic</text>
+
+          <rect class="box-a" x="262" y="326" width="412" height="150"/>
+          <text class="t-h" x="278" y="352">gateway container</text>
+          <text class="t" x="278" y="378">mihomo (TUN) or gluetun (WireGuard / OpenVPN)</text>
+          <text class="t" x="278" y="402">iptables default DROP, tunnel only</text>
+          <text class="t" x="278" y="426">DNS → 127.0.0.1, resolved via tunnel</text>
+          <text class="t" x="278" y="450">IPv6: sysctl off + ip6tables DROP</text>
+
+          <text class="t-w" x="278" y="502">× Docker DNS 127.0.0.11</text>
+          <text class="t-w" x="520" y="502">× IPv6 egress</text>
+
+          <path class="ln-w" d="M262 440 L210 440"/>
+          <path class="x" d="M230 434 L242 446 M242 434 L230 446"/>
+
+          <path class="ln-a" d="M674 372 L776 372" marker-end="url(#ah-a)"/>
+          <text class="t-a" x="724" y="362" style="font-size:12px">tunnel</text>
+          <rect class="box-a" x="780" y="330" width="200" height="84"/>
+          <text class="t-h" x="880" y="362" text-anchor="middle">Remote node / VPN</text>
+          <text class="t" x="880" y="390" text-anchor="middle">sub · nodes · WireGuard</text>
+
+          <path class="ln-a" d="M880 330 L880 206" marker-end="url(#ah-a)"/>
+          <rect class="box" x="780" y="136" width="200" height="66"/>
+          <text class="t-h" x="880" y="175" text-anchor="middle">Internet</text>
+
+          <path class="ln-w" d="M674 452 L770 452"/>
+          <path class="x" d="M740 446 L752 458 M752 446 L740 458"/>
+          <text class="t-w" x="780" y="457">× direct via eth0</text>
+          <text class="t-w" x="780" y="480">(bypassing tunnel)</text>
+        </svg>
+      </div>
+      <figcaption>Solid: allowed · Dashed and ×: blocked<span class="hint"> · Swipe to see the whole diagram</span></figcaption>
+    </figure>
+
+    <div class="two even below">
+      <ul class="ticks" aria-label="Blocked paths">
+        <li class="no"><span><b>Going direct</b>: anything in the gateway that tries to leave via eth0 without the tunnel is rejected by the firewall.</span></li>
+        <li class="no"><span><b>Host or LAN proxies</b>: the gateway's upstream connections may only reach public addresses, so the Clash on your machine is out of reach.</span></li>
+        <li class="no"><span><b>Docker's built-in DNS</b>: 127.0.0.11 may forward through the host, so it's blocked; DNS only goes through the gateway.</span></li>
+        <li class="no"><span><b>IPv6</b>: disabled via sysctl and dropped by ip6tables; if neither takes effect, the gateway refuses to start.</span></li>
+      </ul>
+      <ul class="ticks" aria-label="Gateways">
+        <li><span><b>mihomo gateway</b> (Clash Meta core): uses a subscription or Clash nodes. TUN takes over all traffic at layer 3, so programs that ignore proxy env vars can't slip out.</span></li>
+        <li><span><b>gluetun gateway</b>: your own WireGuard, or a commercial VPN supported by gluetun (WireGuard / OpenVPN), with its built-in kill switch.</span></li>
+        <li><span><b>Firewall first, proxy second</b>: it's default-deny from the moment it boots. The proxy's control API stays inside the gateway, so the agent can't switch it to direct mode.</span></li>
+        <li class="dash"><span>Scope: image pulls and <code>docker build</code> use the host network and are outside the runtime isolation. The AI tools themselves are installed at runtime, through the tunnel.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="sec alt" id="strict" aria-labelledby="strict-title">
+  <div class="shell">
+    <p class="eyebrow">STRICT EGRESS</p>
+    <h2 class="h2" id="strict-title">Your local Clash<br>can't be the upstream.</h2>
+    <p class="lede">Local proxy apps have their own routing rules, and some traffic may go direct by design. If aibox used one as its upstream, it would no longer control where traffic exits. So the upstream must be a remote node or a subscription — paste the subscription URL you already use in Clash.</p>
+
+    <div class="two sec-body">
+      <figure class="term" style="margin:0">
+        <div class="term-bar"><span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>config check</span><span class="tag">Actual error text (Chinese)</span></div>
+        <pre><span class="ps">$ </span><span class="cm">aibox config proxy --nodes clash-local.yaml</span>
+<span class="er">upstream 配置错误: 节点 server: 127.0.0.1 指向本机/宿主机/局域网地址。</span>
+  不允许把本地代理软件（如 Mac 上的 Clash）作为上游，请直接填写该软件所用的远程节点或订阅链接。
+<span class="ps">$ </span><span class="cm">echo $?</span>
+1
+<span class="ps">$ </span><span class="cm">aibox config proxy --sub "https://example.com/your-sub"</span>
+已配置代理出口（mihomo）。aibox up 生效</pre>
+        <figcaption class="term-foot"><span>"Node server 127.0.0.1 points to this machine / host / LAN. Use the remote node or subscription instead."</span></figcaption>
+      </figure>
+      <ul class="ticks">
+        <li><span><b>Layer one, config validation</b>: node addresses can't be localhost, <code>*.internal</code>, <code>*.local</code>, or private/reserved ranges, and <code>type: direct</code> is rejected.</span></li>
+        <li><span><b>Layer two, the firewall</b>: even if a domain in your subscription resolves to the host or LAN, the gateway can't connect to it.</span></li>
+        <li><span><b>Failures leave no trace</b>: a rejected config returns non-zero and your previous config stays as it was.</span></li>
+        <li class="dash"><span>Trade-off: nodes running on your LAN or Tailscale (100.64/10) are rejected too. There's no exception switch for now.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="compare" aria-labelledby="compare-title">
+  <div class="shell">
+    <p class="eyebrow">COMPARISON</p>
+    <h2 class="h2" id="compare-title">A local proxy app<br>solves a different problem.</h2>
+    <p class="lede">Local proxy apps are built for everyday browsing on the whole machine, and flexible routing rules are their strength. aibox does one thing: give an AI agent a workspace with a fixed exit and limited file access. You can use both at once — aibox doesn't touch your machine's proxy settings.</p>
+
+    <div class="tbl-wrap sec-body">
+      <table class="cmp">
+        <caption>Two ways to give an AI coding tool network access</caption>
+        <thead>
+          <tr><th scope="col">Aspect</th><th scope="col">Local proxy app on the host</th><th scope="col">aibox</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Controlled exit</th>
+            <td data-label="Local proxy app">Decided by routing rules; some traffic may go direct by rule. In system-proxy mode, programs that ignore proxy settings use your local network.</td>
+            <td class="us" data-label="aibox">A single "everything through the proxy" rule; TUN or VPN takes over all container traffic at layer 3.</td>
+          </tr>
+          <tr>
+            <th scope="row">Blocks on disconnect</th>
+            <td data-label="Local proxy app">Depends on the app and mode; behavior varies.</td>
+            <td class="us" data-label="aibox">Default-deny: tunnel down means network down, with automatic recovery. You can verify it with <code>doctor --full</code>.</td>
+          </tr>
+          <tr>
+            <th scope="row">Files visible</th>
+            <td data-label="Local proxy app">Unrelated to networking; the agent runs as your user and can read whatever you can.</td>
+            <td class="us" data-label="aibox">Only granted folders, each optionally read-only.</td>
+          </tr>
+          <tr>
+            <th scope="row">Host network impact</th>
+            <td data-label="Local proxy app">System-proxy or TUN mode applies to the whole machine.</td>
+            <td class="us" data-label="aibox">None; rules live only in the container's network namespace.</td>
+          </tr>
+          <tr>
+            <th scope="row">Best for</th>
+            <td data-label="Local proxy app">Everyday networking on the whole machine.</td>
+            <td class="us" data-label="aibox">Letting an AI agent work for long stretches in isolation.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="sec alt" id="start" aria-labelledby="start-title">
+  <div class="shell">
+    <p class="eyebrow">GET STARTED</p>
+    <h2 class="h2" id="start-title">Three steps.<br>The wizard does the rest.</h2>
+    <p class="lede">You'll need Docker, plus a proxy subscription, Clash nodes or a WireGuard config. The first start builds images and installs the AI tools, which takes about 3–5 minutes. The CLI and wizard currently speak Chinese.</p>
+
+    <div class="two sec-body">
+      <ol class="steps">
+        <li>
+          <span class="n">[1]</span>
+          <div>
+            <h3>Install Docker</h3>
+            <p>On macOS use OrbStack or Docker Desktop and start it. On Linux use Docker Engine, then log out and back in once.</p>
+            <div class="os">
+              <div class="os-row"><span>macOS</span>
+                <div class="cli"><pre id="c-mac">brew install orbstack</pre><button class="copy" type="button" data-target="c-mac">Copy</button></div>
+              </div>
+              <div class="os-row"><span>Linux</span>
+                <div class="cli"><pre id="c-linux">curl -fsSL https://get.docker.com | sudo sh &amp;&amp; sudo usermod -aG docker $USER</pre><button class="copy" type="button" data-target="c-linux">Copy</button></div>
+              </div>
+            </div>
+            <p style="margin-top:12px">Windows: install Docker Desktop with WSL2 integration enabled, then do everything below inside a WSL terminal.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">[2]</span>
+          <div>
+            <h3>Get aibox and run the wizard</h3>
+            <p>It asks about egress, granted folders and AI tools; press Enter to accept defaults. At the end it can install the <code>aibox</code> / <code>ai</code> commands with Tab completion, start everything and run the checks.</p>
+            <div class="code"><div class="code-bar"><span>bash</span><button class="mini copy" type="button" data-target="c-init">Copy</button></div>
+<pre id="c-init">git clone https://github.com/OWNER/aibox ~/aibox
+cd ~/aibox
+./aibox init</pre></div>
+          </div>
+        </li>
+        <li>
+          <span class="n">[3]</span>
+          <div>
+            <h3>Start Claude Code in your project</h3>
+            <p>Log in once on first run; credentials persist in the home volume. Press <code>Ctrl+b</code> then <code>d</code> to detach while the task keeps going; run the same command to come back.</p>
+            <div class="cli"><pre id="c-run">ai c myapp</pre><button class="copy" type="button" data-target="c-run">Copy</button></div>
+          </div>
+        </li>
+      </ol>
+
+      <div>
+        <ul class="checks" aria-label="The wizard's five steps">
+          <li><span>[1/5]</span>Environment: Docker and Compose versions, plus the TUN device on Linux.</li>
+          <li><span>[2/5]</span>Egress: subscription, nodes, WireGuard or a commercial VPN. Required.</li>
+          <li><span>[3/5]</span>Folders: paths with Tab completion, each set to rw or ro.</li>
+          <li><span>[4/5]</span>AI tools: which tools, port mappings, API keys (skip if you log in with an account).</li>
+          <li><span>[5/5]</span>Other: time zone, mirror for faster builds; SELinux only if detected.</li>
+        </ul>
+        <ul class="checks cmds below" aria-label="Everyday commands">
+          <li><span><code>ai c myapp</code></span>Start Claude Code in /workspace/myapp</li>
+          <li><span><code>ai x myapp</code></span>Start Codex in the project</li>
+          <li><span><code>ai s</code></span>Open a plain shell (tmux)</li>
+          <li><span><code>ai ls</code></span>List sessions</li>
+          <li><span><code>ai st</code></span>Status and exit IP</li>
+          <li><span><code>ai q</code></span>Stop (data is kept)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="agents" aria-labelledby="agents-title">
+  <div class="shell">
+    <p class="eyebrow">FOR AI AGENTS</p>
+    <h2 class="h2" id="agents-title">Let the agent on your host<br>set it up for you.</h2>
+    <p class="lede">Every setting has a non-interactive command. The repo's <code>AGENTS.md</code> and <code>CLAUDE.md</code> are read automatically by Codex and Claude Code; they spell out the setup flow, how to handle errors, and the safety boundaries not to cross. Open the repo and ask your agent to set up aibox.</p>
+
+    <div class="two sec-body">
+      <div class="code">
+        <div class="code-bar"><span>Non-interactive setup · use your own URL and folders</span><button class="mini copy" type="button" data-target="c-agent">Copy</button></div>
+<pre id="c-agent">./aibox init --defaults                     <span class="c"># default config; never overwrites</span>
+./aibox config proxy --sub "https://example.com/your-sub" --filter 'JP'
+./aibox mounts add rw ~/code/myapp
+./aibox mounts add ro ~/Documents/specs
+./aibox config tools claude codex
+<span class="c"># optional: only if you use an API key instead of logging in</span>
+printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
+./aibox config check &amp;&amp; ./aibox up &amp;&amp; ./aibox doctor --full</pre>
+      </div>
+      <ul class="ticks">
+        <li><span><b>No prompts, just exit codes</b>: 0 on success, non-zero on failure with the reason on stderr.</span></li>
+        <li><span><b>Failures don't touch your config</b>: an invalid node, for example, rolls the write back, so retrying is safe.</span></li>
+        <li><span><b>Secrets stay off the command line</b>: API keys come from stdin and VPN keys from environment variables, never command arguments.</span></li>
+        <li><span><b>No guessing, no overreach</b>: the agent asks you for the subscription URL and folders, and won't edit firewall rules, widen mounts or mount the Docker socket.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="sec alt" id="doctor" aria-labelledby="doctor-title">
+  <div class="shell">
+    <p class="eyebrow">DOCTOR</p>
+    <h2 class="h2" id="doctor-title">Is the isolation working?<br>Run one command and see.</h2>
+    <p class="lede"><code>aibox doctor --full</code> doesn't just read config — it sends real requests from inside the container to check egress, DNS, IPv6, privileges and mounts, then simulates a disconnect, confirms traffic is blocked, and confirms recovery. Any failure means a non-zero exit.</p>
+
+    <div class="two sec-body">
+      <figure class="term" style="margin:0">
+        <div class="term-bar"><span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>aibox doctor --full</span><span class="tag">Illustrative · mihomo gateway</span></div>
+        <pre><span class="hd">宿主机</span>  <span class="d">host</span>
+  <span class="ok">✔</span> 系统: Linux  Docker 29.x  Compose 2.40.x
+<span class="hd">容器</span>  <span class="d">containers</span>
+  <span class="ok">✔</span> 网关健康
+  <span class="ok">✔</span> workspace 运行中
+<span class="hd">出口</span>  <span class="d">egress</span>
+  <span class="ok">✔</span> 容器出口: 203.0.113.24 JP AS64500 Example
+    宿主机出口: 198.51.100.7
+<span class="hd">IPv6</span>
+  <span class="ok">✔</span> IPv6 出网被阻断
+  <span class="ok">✔</span> 无全局 IPv6 地址
+<span class="hd">DNS</span>
+  <span class="ok">✔</span> resolv.conf 指向网关本地 DNS (127.0.0.1)
+  <span class="ok">✔</span> 域名解析由网关接管（fake-ip，真实解析在代理远端完成）
+  <span class="ok">✔</span> 程序硬编码外部 DNS(@8.8.8.8) 也被劫持到网关
+  <span class="ok">✔</span> Google 权威 DNS 看到的查询来源: 203.0.113.30 edns0-client-subnet 203.0.113.0/24
+<span class="hd">隔离</span>  <span class="d">isolation</span>
+  <span class="ok">✔</span> workspace 无 NET_ADMIN / NET_RAW / SYS_ADMIN（root 也改不了网络）
+  <span class="ok">✔</span> 绕过隧道直连物理网卡被防火墙拒绝
+  <span class="ok">✔</span> 上游只允许公网节点（宿主机 Clash / 局域网代理被防火墙禁止）
+  <span class="ok">✔</span> 当前节点: JP-Tokyo-01（组内无节点时为 REJECT 断网，不会回落直连）
+  <span class="ok">✔</span> mihomo 控制接口对 workspace 不可见
+<span class="hd">断线阻断（模拟隧道断开）</span>  <span class="d">kill switch</span>
+  <span class="ok">✔</span> 隧道断开后流量被完全阻断
+  <span class="ok">✔</span> 隧道断开后直连 IP 同样被阻断
+  <span class="ok">✔</span> 隧道恢复后自动重新联网（约 4 秒）
+<span class="hd">挂载</span>  <span class="d">mounts</span>
+  <span class="ok">✔</span> /workspace/myapp (rw)
+  <span class="ok">✔</span> /workspace/specs (ro)
+
+<span class="ok">全部通过</span> (20 项)  <span class="d">all passed</span></pre>
+      </figure>
+      <div>
+        <ul class="checks" aria-label="What doctor checks">
+          <li><span>Egress</span>The container's exit IP and region, compared with the host's; a warning if they match.</li>
+          <li><span>DNS</span>Resolution happens at the gateway; hard-coded 8.8.8.8 is intercepted; authoritative DNS sees the exit network, not your ISP.</li>
+          <li><span>IPv6</span>IPv6 can't get out, and the container has no global IPv6 address.</li>
+          <li><span>Isolation</span>Workspace capabilities; direct egress is rejected; upstream limited to public addresses; control API unreachable.</li>
+          <li class="full"><span>Kill</span>Stops the proxy or downs the VPN interface, confirms requests fail, then confirms automatic recovery.</li>
+          <li><span>Mounts</span>Each granted folder's actual permissions match the configured ro / rw.</li>
+        </ul>
+        <div class="cli below"><pre id="c-doctor">aibox doctor --full</pre><button class="copy" type="button" data-target="c-doctor">Copy</button></div>
+        <p class="note"><span class="lbl">NOTE</span>The list above uses the mihomo gateway. With gluetun there are fewer DNS and isolation checks, and the disconnect test downs the VPN interface instead.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="faq" aria-labelledby="faq-title">
+  <div class="shell">
+    <p class="eyebrow">FAQ</p>
+    <h2 class="h2" id="faq-title">Before you start,<br>a few questions.</h2>
+    <div class="faq sec-body">
+      <details>
+        <summary><span>Can I use the Clash already running on my computer?</span></summary>
+        <div class="ans">
+          <p>No, by design. Clash's routing rules may send some traffic direct, and then the exit is no longer under control. Upstreams pointing at this machine, the host or the LAN are rejected by both config validation and the firewall.</p>
+          <p>Instead, paste the subscription URL you use in Clash: <code>aibox config proxy --sub "URL"</code>.</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>Which systems are supported?</span></summary>
+        <div class="ans">
+          <p>macOS (Apple Silicon and Intel; OrbStack recommended, Docker Desktop and Colima work too) and Linux (Docker Engine 25+ and Compose 2.24+).</p>
+          <p>Tested on Ubuntu 24.04 arm64 with Docker 29 and Compose 2.40; both gateways pass <code>doctor --full</code>, and the script is compatible with the bash 3.2 that ships with macOS. It hasn't yet been tested on a physical Mac, on SELinux systems (Fedora / RHEL) or with rootless Docker — reports are welcome.</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>How long does the first start take?</span></summary>
+        <div class="ans">
+          <p>About 3–5 minutes: two images are built, then the AI tools you chose are installed through the tunnel. Later starts don't rebuild; tools, logins and shell history live in a persistent home volume.</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>How do I use it on Windows?</span></summary>
+        <div class="ans">
+          <p>Inside WSL2: install Docker Desktop with WSL2 integration, then <code>git clone</code> and run <code>./aibox init</code> in a WSL terminal. From there it works the same as on Linux.</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>Is <code>--yolo</code> safe?</span></summary>
+        <div class="ans">
+          <p><code>ai c myapp --yolo</code> skips the tool's own per-action confirmations. The container is the sandbox: the agent can only change folders you granted as rw, and the network only goes through the gateway. Inside rw folders it can change anything, so grant reference material as ro and keep projects under git.</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>What happens when the proxy node goes down?</span></summary>
+        <div class="ans">
+          <p>Programs in the container simply can't connect; nothing falls back to your local network. It reconnects automatically when the node is back, with no container restart. If <code>aibox up</code> reports an unhealthy gateway, check <code>aibox logs gateway</code> — usually the subscription failed to download or no node is reachable.</p>
+        </div>
+      </details>
+      <details>
+        <summary><span>Is aibox affiliated with Anthropic or OpenAI?</span></summary>
+        <div class="ans">
+          <p>No. aibox is an independent open-source project that runs these tools in a container. It is not affiliated with or endorsed by Anthropic or OpenAI. Using Claude Code or Codex is subject to their respective terms.</p>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="shell">
+    <div class="foot-grid">
+      <div>
+        <a class="logo" href="./"><i aria-hidden="true"></i>aibox</a>
+        <p style="margin:14px 0 0;max-width:28em">A lightweight Linux terminal for AI coding tools, in Docker. Controlled egress, per-folder file access.</p>
+      </div>
+      <div>
+        <h2>Project</h2>
+        <ul>
+          <li><a href="https://github.com/OWNER/aibox">GitHub repository</a></li>
+          <li><a href="https://github.com/OWNER/aibox/issues">Issues</a></li>
+          <li><a href="https://github.com/OWNER/aibox/blob/main/LICENSE">License: LICENSE_NAME</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Docs (Chinese)</h2>
+        <ul>
+          <li><a href="https://github.com/OWNER/aibox/blob/main/docs/GUIDE.md">Setup and usage guide</a></li>
+          <li><a href="https://github.com/OWNER/aibox/blob/main/docs/ARCHITECTURE.md">Architecture and security</a></li>
+          <li><a href="https://github.com/OWNER/aibox/blob/main/AGENTS.md">AGENTS.md</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <p>aibox is an independent open-source project, not affiliated with, endorsed or sponsored by Anthropic or OpenAI. Claude Code, Codex and related names are trademarks of their respective owners and are used here only to describe compatibility.</p>
+      <p>aibox is meant for controlling AI tools' network egress, preventing leaks and isolating files. Use it in compliance with local laws and the terms of the services you use.</p>
+      <p>This site uses no cookies, no analytics or tracking scripts, and loads no third-party resources.</p>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/site.js" defer></script>
+</body>
+</html>
