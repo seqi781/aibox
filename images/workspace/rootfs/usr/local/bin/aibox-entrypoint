@@ -4,6 +4,10 @@ if [ "$(stat -c %u "$HOME")" != "$(id -u)" ]; then
   sudo chown -R "$(id -u):$(id -g)" "$HOME"
 fi
 mkdir -p "$HOME/.npm-global" "$HOME/.local/bin"
+# ~/.bashrc（来自 /etc/skel）会把提示符改回 Debian 默认样式；在它最后加载 aibox 的提示符
+if ! grep -q '/etc/aibox/prompt.sh' "$HOME/.bashrc" 2>/dev/null; then
+  printf '\n# aibox 提示符（保持在最后）\n[ -f /etc/aibox/prompt.sh ] && . /etc/aibox/prompt.sh\n' >> "$HOME/.bashrc"
+fi
 # 重建容器后恢复之前按出口地区设置的语言（locale 生成在容器层，不在 home 卷里）
 lang="$(sed -n 's/^LANG=//p' "$HOME/.config/aibox/locale.env" 2>/dev/null)"
 if [ -n "$lang" ] && ! locale -a 2>/dev/null | grep -qix "${lang%%.*}.utf8"; then

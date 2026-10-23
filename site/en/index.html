@@ -77,11 +77,8 @@
 会话:
   （无）
 <span class="ps">$ </span><span class="cm">ai c myapp</span>
-<span class="ok">==&gt;</span> 在 /workspace/myapp 启动 claude（会话 claude-myapp；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）
-<span class="d">    … Claude Code working inside tmux (UI omitted) …</span>
-<span class="d">    [Ctrl+b d to detach; the task keeps running]</span>
-<span class="ps">$ </span><span class="cm">ai ls</span>
-claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
+<span class="d">    … Claude Code runs right in your terminal (UI omitted) …</span>
+<span class="d">    [to keep it running after closing the terminal: ai c myapp --tmux]</span>
 </pre>
       <figcaption class="term-foot">
         <span>The CLI currently prints Chinese · ai c = aibox claude</span>
@@ -96,11 +93,8 @@ claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
       {"out": "会话:"},
       {"out": "  （无）", "wait": 700},
       {"cmd": "ai c myapp"},
-      {"out": "==> 在 /workspace/myapp 启动 claude（会话 claude-myapp；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）", "wait": 700},
-      {"out": "    … Claude Code working inside tmux (UI omitted) …", "cls": "d", "wait": 1200},
-      {"out": "    [Ctrl+b d to detach; the task keeps running]", "cls": "d", "wait": 700},
-      {"cmd": "ai ls"},
-      {"out": "claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026"}
+      {"out": "    … Claude Code runs right in your terminal (UI omitted) …", "cls": "d", "wait": 1200},
+      {"out": "    [to keep it running after closing the terminal: ai c myapp --tmux]", "cls": "d", "wait": 700}
     ]</script>
   </div>
 </section>
@@ -146,7 +140,7 @@ claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
         <p class="q">06 / WEIGHT</p>
         <p class="worry"><span>Do I need a full virtual machine for this kind of isolation?</span></p>
         <h3>Two containers, a real terminal</h3>
-        <p>No extra VM. You get bash, tmux, git, node, python and a build toolchain — not a toy sandbox. tmux sessions persist, so tasks keep running after you close the terminal or drop SSH.</p>
+        <p>No extra VM. You enter it from your own system terminal and get bash, git, node, python and a build toolchain — not a toy sandbox. Add <code>--tmux</code> when a task should keep running after you close the terminal.</p>
       </article>
     </div>
   </div>
@@ -360,7 +354,7 @@ cd ~/aibox
           <span class="n">[3]</span>
           <div>
             <h3>Start Claude Code in your project</h3>
-            <p>Log in once on first run; credentials persist in the home volume. Press <code>Ctrl+b</code> then <code>d</code> to detach while the task keeps going; run the same command to come back.</p>
+            <p>Log in once on first run; credentials persist in the home volume. It runs right in your current terminal; add <code>--tmux</code> to keep it running after you close the window.</p>
             <div class="cli"><pre id="c-run">ai c myapp</pre><button class="copy" type="button" data-target="c-run">Copy</button></div>
           </div>
         </li>
@@ -376,8 +370,8 @@ cd ~/aibox
         <ul class="checks cmds below" aria-label="Everyday commands">
           <li><span><code>ai c myapp</code></span>Start Claude Code in /workspace/myapp</li>
           <li><span><code>ai x myapp</code></span>Start Codex in the project</li>
-          <li><span><code>ai s</code></span>Open a plain shell (tmux)</li>
-          <li><span><code>ai ls</code></span>List sessions</li>
+          <li><span><code>ai</code></span>Open a shell in the container, at the matching project folder</li>
+          <li><span><code>ai c --tmux</code></span>Keep running after you close the terminal</li>
           <li><span><code>ai st</code></span>Status and exit IP</li>
           <li><span><code>ai q</code></span>Stop (data is kept)</li>
         </ul>

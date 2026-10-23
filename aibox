@@ -1175,11 +1175,25 @@ ensure_up() {
   if ! is_running "$WS" || ! is_running "$GW"; then cmd_up; else fix_netns; fi
 }
 
-# 项目名 → 容器内目录。空：只有一个项目时用它，否则 /workspace
+# 宿主机当前目录 → 容器内目录（在授权目录里时）。例: ~/code/app/src → /workspace/app/src
+cwd_in_container() {
+  local cwd m h t
+  cwd="$(pwd -P 2>/dev/null)" || return 1
+  while IFS='	' read -r m h t; do
+    [ -n "$h" ] && [ -d "$h" ] || continue
+    case "$cwd/" in "$h"/*) printf '%s%s' "$t" "${cwd#"$h"}"; return 0 ;; esac
+  done <<EOF2
+$MOUNT_LIST
+EOF2
+  return 1
+}
+
+# 项目名 → 容器内目录。不写项目名时：当前目录在授权目录里就用它；只授权了一个项目就用它；否则 /workspace
 resolve_project() {
-  local p="$1" list n
+  local p="$1" list n d
   list="$(list_projects)"; n="$(printf '%s' "$list" | grep -c . || true)"
   if [ -z "$p" ]; then
+    if d="$(cwd_in_container)"; then echo "$d"; return; fi
     if [ "$n" = 1 ]; then echo "/workspace/$list"; else echo /workspace; fi; return
   fi
   case "$p" in /*) echo "$p"; return ;; esac
@@ -1188,31 +1202,42 @@ resolve_project() {
 }
 session_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_'; }
 
-cmd_shell() {
-  local arg="" raw=0 dir=/workspace session=main
-  while [ $# -gt 0 ]; do
-    case "$1" in --bash|--no-tmux) raw=1 ;; -*) die "未知参数 $1" ;; *) arg="$1" ;; esac; shift
+# 把宿主机终端的信息带进容器，让程序按你实际使用的终端来渲染
+TERM_ARGS=()
+term_args() {
+  local t="${TERM:-xterm-256color}" v
+  docker exec "$WS" infocmp "$t" >/dev/null 2>&1 || t=xterm-256color
+  TERM_ARGS=(-e "TERM=$t")
+  for v in COLORTERM TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION; do
+    [ -n "${!v:-}" ] && TERM_ARGS+=(-e "$v=${!v}")
   done
-  ensure_up
-  if [ -n "$arg" ]; then
-    if list_projects | grep -qxF "${arg%%/*}"; then dir="/workspace/$arg"; fi
-    session="$(session_name "$arg")"
-  fi
   geo_args
-  local env=(-e TERM=xterm-256color -e COLORTERM=truecolor ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} -w "$dir")
-  if [ "$raw" = 1 ]; then exec docker exec $TTY_FLAG "${env[@]}" "$WS" bash -l; fi
-  exec docker exec $TTY_FLAG "${env[@]}" "$WS" tmux new-session -A -s "$session" -c "$dir"
+  TERM_ARGS+=(${GEO_ARGS[@]+"${GEO_ARGS[@]}"})
 }
 
-# 快捷启动 AI agent：在项目目录中、以独立 tmux 会话运行；会话已存在则直接恢复
+# 进入容器终端：默认直接用你的系统终端（和 ssh 登录一台机器一样）；--tmux 时进入可恢复的 tmux 会话
+cmd_shell() {
+  local arg="" tmux=0 dir
+  while [ $# -gt 0 ]; do
+    case "$1" in --tmux) tmux=1 ;; --bash|--no-tmux) tmux=0 ;; -*) die "未知参数 $1（可用: --tmux）" ;; *) arg="$1" ;; esac; shift
+  done
+  ensure_up; dir="$(resolve_project "$arg")"; term_args
+  if [ "$tmux" = 1 ]; then
+    exec docker exec $TTY_FLAG "${TERM_ARGS[@]}" -w "$dir" "$WS" tmux new-session -A -s "$(session_name "${arg:-main}")" -c "$dir"
+  fi
+  exec docker exec $TTY_FLAG "${TERM_ARGS[@]}" -w "$dir" "$WS" bash -l
+}
+
+# 启动 AI 工具：默认直接在当前终端运行；--tmux 时放进可恢复的 tmux 会话（关掉终端也继续）
 cmd_agent() {
   local tool="$1"; shift
-  local proj="" new=0 yolo=0 args=()
+  local proj="" new=0 yolo=0 tmux=0 args=()
   if [ $# -gt 0 ]; then case "$1" in -*) ;; *) proj="$1"; shift ;; esac; fi
   while [ $# -gt 0 ]; do
     case "$1" in
       --yolo) yolo=1 ;;
-      --new)  new=1 ;;
+      --tmux) tmux=1 ;;
+      --new)  new=1; tmux=1 ;;
       --) shift; args+=("$@"); break ;;
       *) args+=("$1") ;;
     esac; shift
@@ -1222,7 +1247,6 @@ cmd_agent() {
     info "第一次使用 ${tool}，正在安装（经网关下载，之后保存在持久化 home 中）"
     docker exec $TTY_FLAG "$WS" aibox-setup "$tool" || die "$tool 安装失败。检查网络: aibox doctor；重试: aibox setup $tool"
   fi
-  geo_args
   if [ "$yolo" = 1 ]; then   # 容器即沙箱：跳过工具自身的逐条确认
     case "$tool" in
       claude) args=(--dangerously-skip-permissions ${args[@]+"${args[@]}"}) ;;
@@ -1230,23 +1254,26 @@ cmd_agent() {
       gemini) args=(--yolo ${args[@]+"${args[@]}"}) ;;
     esac
   fi
-  local dir sess; dir="$(resolve_project "$proj")"
+  local dir sess; dir="$(resolve_project "$proj")"; term_args
+  if [ "$tmux" = 0 ]; then
+    exec docker exec $TTY_FLAG "${TERM_ARGS[@]}" -w "$dir" "$WS" bash -lc 'exec "$@"' _ "$tool" ${args[@]+"${args[@]}"}
+  fi
   sess="$(session_name "$tool-${proj:-$(basename "$dir")}")"
   if [ "$new" = 1 ]; then sess="$sess-$(date +%H%M%S)"; fi
   if docker exec "$WS" tmux has-session -t "=$sess" 2>/dev/null; then
     info "恢复会话 ${sess}（新开一个: 加 --new）"
   else
-    info "在 $dir 启动 ${tool}（会话 ${sess}；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）"
+    info "在 $dir 启动 ${tool}（tmux 会话 ${sess}；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）"
   fi
-  exec docker exec $TTY_FLAG -e TERM=xterm-256color -e COLORTERM=truecolor ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} -w "$dir" "$WS" \
+  exec docker exec $TTY_FLAG "${TERM_ARGS[@]}" -w "$dir" "$WS" \
     tmux new-session -A -s "$sess" -c "$dir" -n "$tool" \
     bash -lc '"$@"; echo; echo "[$1 已退出，当前为普通 shell；exit 关闭会话]"; exec bash -l' _ "$tool" ${args[@]+"${args[@]}"}
 }
 
 cmd_exec() {
   [ $# -gt 0 ] || die "用法: aibox exec <命令> [参数...]"
-  ensure_up; geo_args
-  exec docker exec $TTY_FLAG -e TERM=xterm-256color ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} -w /workspace "$WS" "$@"
+  ensure_up; term_args
+  exec docker exec $TTY_FLAG "${TERM_ARGS[@]}" -w "$(resolve_project "")" "$WS" bash -lc 'exec "$@"' _ "$@"
 }
 
 cmd_sessions() {
@@ -1701,11 +1728,13 @@ ${B}非交互配置${N}（不提问，失败返回非 0 且不改动原配置）
   config check                 config show           config set AIBOX_<键> <值>
 
 ${B}日常${N}                                                    ${D}简写${N}
-  claude [项目] [参数]  在项目目录启动 Claude Code（第一次自动安装；会话可恢复） c
+  （不写项目名时：当前目录在授权目录里，就进入容器里对应的位置）
+  claude [项目] [参数]  启动 Claude Code（第一次自动安装）                 c
   codex  [项目] [参数]  在项目目录启动 Codex                              x
-        --yolo          跳过逐条确认（容器即沙箱）   --new  新开会话而不是恢复
-  shell  [项目]         进入终端（tmux；断开后可恢复）  --bash 不用 tmux   s
-  sessions              列出所有会话                                      ls
+        --yolo          跳过逐条确认（容器即沙箱）
+        --tmux          放进 tmux 会话：关掉终端也继续运行，再次运行同一命令回来（--new 再开一个）
+  shell  [项目]         进入容器终端（直接用你的系统终端；--tmux 同上）   s，或只输入 ai
+  sessions              列出 --tmux 会话                                  ls
   exec <命令...>        在容器中执行一条命令
   status                状态、出口 IP、会话                               st
   stop | restart        停止 / 重启（数据保留）                           q
@@ -1719,6 +1748,8 @@ ${B}管理${N}
 EOF
 }
 
+# 用短命令 ai 且不带参数时，直接进入终端（当前目录在授权目录里就进入对应位置）
+if [ $# -eq 0 ] && [ "$(basename "$0")" != aibox ]; then set -- shell; fi
 cmd="${1:-help}"; [ $# -gt 0 ] && shift
 case "$cmd" in
   init) cmd_init "$@" ;;

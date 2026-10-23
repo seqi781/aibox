@@ -2,7 +2,7 @@
 
 在 Docker 里运行 Claude Code、Codex 等 AI 编程工具的轻量 Linux 终端，支持 **macOS 和 Linux**（Windows 可在 WSL2 中使用）：
 
-- **完整终端**：bash、tmux、git、node、python、编译工具链
+- **完整终端**：直接用你的系统终端进入，bash、git、node、python、编译工具链；需要后台常驻时可选 tmux
 - **独立出口**：所有流量强制走代理或 VPN，有 DNS、IPv4、IPv6 泄漏防护和断线阻断，不改动宿主机网络
 - **文件授权**：只有你列出的目录对容器可见，每个目录单独设置只读或读写
 - **两种配置方式**：人用交互式向导；AI agent 用非交互命令（见 [AGENTS.md](AGENTS.md)）
@@ -31,18 +31,21 @@ cd ~/aibox
 
 ## 日常使用
 
+就在你平时用的终端（Terminal、iTerm 等）里操作，进入项目目录后在命令前加 `ai`：
+
 ```bash
-ai c myapp          # 在 /workspace/myapp 启动 Claude Code（aibox claude myapp）
-ai x myapp          # 启动 Codex（aibox codex myapp）
-ai c myapp --yolo   # 跳过逐条确认（容器即沙箱）
-ai s                # 进入普通终端（tmux）
-ai ls               # 查看所有会话
+cd ~/code/myapp
+ai                  # 进入容器终端，直接位于 /workspace/myapp（提示符以 [aibox] 开头，exit 退出）
+ai claude           # 在这个项目里启动 Claude Code（第一次自动安装）；也可以 ai c
+ai codex            # 启动 Codex；也可以 ai x
+ai claude --yolo    # 跳过逐条确认（容器即沙箱）
+ai claude --tmux    # 放进 tmux：关掉终端也继续运行，再次运行同一命令回来
 ai st               # 状态和出口 IP
 ai r                # 环境检测报告：出口 IP 类型与风险、DNS、时区一致性，判定高 / 中 / 低风险
 ai q                # 停止
 ```
 
-- 按 `Ctrl+b` 再按 `d` 离开会话，任务在后台继续；再次运行同一条命令即可回到原处。
+- 不在项目目录时也可以写项目名：`ai claude myapp`。
 - 首次运行 `claude` / `codex` 时按提示登录一次，凭据会持久保存。
 - 更多用法见 `aibox help` 和 [指南第 2 节](docs/GUIDE.md#2-命令速查)。
 

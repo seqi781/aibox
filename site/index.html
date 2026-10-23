@@ -78,14 +78,11 @@
 会话:
   （无）
 <span class="ps">$ </span><span class="cm">ai c myapp</span>
-<span class="ok">==&gt;</span> 在 /workspace/myapp 启动 claude（会话 claude-myapp；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）
-<span class="d">    … Claude Code 在 tmux 会话里工作（界面略）…</span>
-<span class="d">    [按 Ctrl+b d 离开，任务在后台继续]</span>
-<span class="ps">$ </span><span class="cm">ai ls</span>
-claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
+<span class="d">    … Claude Code 直接在你的终端里运行（界面略）…</span>
+<span class="d">    [需要关掉终端也继续跑：ai c myapp --tmux]</span>
 </pre>
       <figcaption class="term-foot">
-        <span>ai c = aibox claude · ai ls = aibox sessions</span>
+        <span>ai c = aibox claude</span>
         <button class="mini" type="button" id="demo-replay">重播</button>
       </figcaption>
     </figure>
@@ -97,11 +94,8 @@ claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
       {"out": "会话:"},
       {"out": "  （无）", "wait": 700},
       {"cmd": "ai c myapp"},
-      {"out": "==> 在 /workspace/myapp 启动 claude（会话 claude-myapp；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）", "wait": 700},
-      {"out": "    … Claude Code 在 tmux 会话里工作（界面略）…", "cls": "d", "wait": 1200},
-      {"out": "    [按 Ctrl+b d 离开，任务在后台继续]", "cls": "d", "wait": 700},
-      {"cmd": "ai ls"},
-      {"out": "claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026"}
+      {"out": "    … Claude Code 直接在你的终端里运行（界面略）…", "cls": "d", "wait": 1200},
+      {"out": "    [需要关掉终端也继续跑：ai c myapp --tmux]", "cls": "d", "wait": 700}
     ]</script>
   </div>
 </section>
@@ -148,7 +142,7 @@ claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
         <p class="q">06 / WEIGHT</p>
         <p class="worry"><span>为了隔离，是不是得开一台完整的虚拟机？</span></p>
         <h3>两个容器，一台完整的终端</h3>
-        <p>不用额外装虚拟机。里面有 bash、tmux、git、node、python 和编译工具链，不是只能跑几条命令的玩具沙箱；tmux 会话常驻，关掉终端或断开 SSH，任务照样在跑。</p>
+        <p>不用额外装虚拟机。直接用你自己的系统终端进入，里面有 bash、git、node、python 和编译工具链，不是只能跑几条命令的玩具沙箱；需要时加 <code>--tmux</code>，关掉终端任务照样在跑。</p>
       </article>
     </div>
   </div>
@@ -378,7 +372,7 @@ cd ~/aibox
           <span class="n">[3]</span>
           <div>
             <h3>在项目里启动 Claude Code</h3>
-            <p>首次运行时按提示登录一次，凭据保存在持久化的 home 卷里。按 <code>Ctrl+b</code> 再按 <code>d</code> 离开，任务继续；再次运行同一条命令就回到原处。</p>
+            <p>首次运行时按提示登录一次，凭据保存在持久化的 home 卷里。它直接运行在你当前的终端里；想关掉终端后继续跑，加 <code>--tmux</code>。</p>
             <div class="cli"><pre id="c-run">ai c myapp</pre><button class="copy" type="button" data-target="c-run">复制</button></div>
           </div>
         </li>
@@ -394,8 +388,8 @@ cd ~/aibox
         <ul class="checks cmds below" aria-label="日常命令">
           <li><span><code>ai c myapp</code></span>在 /workspace/myapp 启动 Claude Code</li>
           <li><span><code>ai x myapp</code></span>在项目里启动 Codex</li>
-          <li><span><code>ai s</code></span>进入普通终端（tmux）</li>
-          <li><span><code>ai ls</code></span>查看所有会话</li>
+          <li><span><code>ai</code></span>进入容器终端（按当前目录定位到项目）</li>
+          <li><span><code>ai c --tmux</code></span>关掉终端也继续运行</li>
           <li><span><code>ai st</code></span>状态和出口 IP</li>
           <li><span><code>ai q</code></span>停止（数据保留）</li>
         </ul>

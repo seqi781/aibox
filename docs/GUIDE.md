@@ -83,22 +83,22 @@ aibox config mounts      # 只改授权目录
 
 | 命令 | 简写 | 作用 |
 |---|---|---|
-| `aibox claude <项目>` | `ai c <项目>` | 在 `/workspace/<项目>` 启动 Claude Code |
-| `aibox codex <项目>` | `ai x <项目>` | 在项目目录启动 Codex |
-| `aibox shell [项目]` | `ai s` | 进入终端（tmux） |
-| `aibox sessions` | `ai ls` | 列出所有会话 |
+| `aibox shell [项目]` | `ai` 或 `ai s` | 进入容器终端（就在你的系统终端里，提示符以 `[aibox]` 开头，`exit` 退出） |
+| `aibox claude [项目]` | `ai c` | 启动 Claude Code（第一次自动安装） |
+| `aibox codex [项目]` | `ai x` | 启动 Codex |
+| `aibox exec <命令>` | | 在容器里执行一条命令，例如 `ai exec npm test` |
+| `aibox sessions` | `ai ls` | 列出 `--tmux` 会话 |
 | `aibox status` | `ai st` | 状态、出口 IP、会话 |
 | `aibox up` / `aibox stop` | `ai u` / `ai q` | 启动 / 停止 |
 | `aibox doctor [--full]` | `ai d` | 体检 |
 
-`aibox claude` / `aibox codex` 的规则：
-- 每个"工具 + 项目"对应一个独立的 tmux 会话（如 `claude-myapp`）。
-- 会话已存在时，再次运行同一命令会**回到原会话**，不会重新启动。想同时开第二个，加 `--new`。
+用法规则：
+- **就用你的系统终端**：aibox 不提供自己的终端窗口。`ai` / `ai claude` 把你当前的终端直接接进容器，滚动、复制粘贴、快捷键都和平常一样。
+- **按当前目录定位**：在 Mac 上 `cd` 到某个授权目录（或它的子目录）再运行，就进入容器里对应的位置，例如 `~/code/myapp/src` → `/workspace/myapp/src`。不在授权目录里时，可以写项目名（`ai claude myapp`），否则进入 `/workspace`。
+- **`--tmux`（可选）**：需要关掉终端后任务继续运行时使用。每个"工具 + 项目"一个会话（如 `claude-myapp`），再次运行同一命令回到原会话；`--new` 再开一个；`Ctrl+b d` 离开。
 - `--yolo`：跳过工具自身的逐条确认（Claude 的 `--dangerously-skip-permissions`，Codex 的 `--dangerously-bypass-approvals-and-sandbox`）。容器本身就是沙箱，agent 只能改动你授权为 rw 的目录。
 - 其余参数原样传给工具，例如 `aibox claude myapp -c`（继续上次对话）、`aibox codex myapp resume --last`。
-- 不写项目名时：只授权了一个项目就用它，否则进入 `/workspace`。
-
-tmux 常用键：`Ctrl+b d` 离开（任务继续运行）· `Ctrl+b c` 新窗口 · `Ctrl+b 数字` 切换窗口 · 鼠标滚轮查看历史。
+- 继续上次的对话不需要 tmux：`ai claude -c`（Claude Code）、`ai codex resume --last`（Codex）。
 
 ### 配置（非交互，人和 agent 都可以用）
 
@@ -193,8 +193,8 @@ aibox codex myapp      # 在 Codex 里选择登录；容器内没有浏览器，
 用 API Key 的话，`aibox config key ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 保存后执行 `aibox up`，就不需要登录了。
 
 ### 推荐工作方式
-- **一个项目一个会话**：`ai c app`、`ai c api` 各自独立，`Ctrl+b d` 离开后在后台继续跑，`ai ls` 查看所有会话。
-- **长任务放心离开**：关掉终端甚至断开 SSH 都不影响，下次运行同一命令就回到原会话。
+- **多开**：在终端里多开几个标签页，分别 `cd` 到不同项目运行 `ai claude`，互不影响。
+- **长任务放心离开**：用 `ai claude --tmux`，关掉终端甚至断开 SSH 都不影响，下次运行同一命令就回到原会话。
 - **参考资料设为只读**：把文档、规范、其它仓库用 `ro` 授权，agent 能读不能改。
 - **项目说明文件**：在项目根目录放 `CLAUDE.md`（Claude Code）或 `AGENTS.md`（Codex），写上构建、测试命令和约定，agent 会自动读取。
 - **git 与 SSH**：建议在容器内单独生成密钥（`ssh-keygen`，保存在持久化 home 卷），只加到需要的仓库，而不是挂载 Mac 上的 `~/.ssh`。
