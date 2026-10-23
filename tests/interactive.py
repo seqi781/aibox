@@ -158,6 +158,11 @@ drive('config network：商业 VPN（OpenVPN）', ['config', 'network'], [
 ])
 check('OpenVPN 写入 gluetun.env', 'OPENVPN_USER=user' in conf('gluetun.env'))
 
+os.makedirs(W + '/home/code/gone'); open(W + '/repo/config/mounts.conf', 'a').write('rw  ~/code/gone\n'); os.rmdir(W + '/home/code/gone')
+t = drive('config mounts：自动移除已不存在的文件夹', ['config', 'mounts'], [
+    (r'~/code/gone 已不存在[\s\S]*保留以上授权？ \[Y/n\]: ', ''), (r'继续添加.*: ', ''),
+])
+check('已不存在的文件夹从 mounts.conf 移除', 'gone' not in conf('mounts.conf'))
 drive('config mounts：清空后重新添加', ['config', 'mounts'], [
     (r'保留以上授权？ \[Y/n\]: ', 'n'), (r'编号或路径.*: ', '~/code/app'), (r'允许 AI 修改.*: ', 'n'), (r'继续添加.*: ', ''),
 ])

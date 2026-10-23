@@ -122,6 +122,11 @@ run 1 ./aibox config set FOO bar
 run 0 ./aibox config get AIBOX_TZ
 run 0 ./aibox config show
 run 0 ./aibox config check
+# 授权的文件夹被删除后：跳过并警告，不能让启动失败
+mkdir -p "$HOME/code/gone"; run 0 ./aibox mounts add rw ~/code/gone; rm -rf "$HOME/code/gone"
+run 0 ./aibox config check
+expect "不存在的文件夹只警告" sh -c './aibox config check 2>&1 | grep -q "授权的文件夹不存在，已跳过: ~/code/gone"'
+run 0 ./aibox mounts rm gone
 
 # ---------- VPN ----------
 printf '[Interface]\nPrivateKey = k\nAddress = 10.0.0.2, fd00::2\n[Peer]\nPublicKey = p\nEndpoint = vpn.example.com:51820\nAllowedIPs = 0.0.0.0/0\n' > "$W/wg.conf"

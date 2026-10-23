@@ -317,6 +317,10 @@ gen_override() {
       ln=$((ln + 1))
       parse_mount_line "$line" || continue
       case "$M_MODE" in rw|ro) ;; *) die "mounts.conf 第 $ln 行: 模式必须是 rw 或 ro: $line" ;; esac
+      # 文件夹被删除或移动了：跳过这一项（少挂载一个目录不影响安全），其它错误仍然中止
+      if [ ! -e "$(expand_tilde "$M_HOST")" ]; then
+        warn "授权的文件夹不存在，已跳过: ${M_HOST}（运行 aibox config 重新选择项目文件夹）"; continue
+      fi
       host="$(canon_host_path "$M_HOST" 2>&1)" || die "mounts.conf 第 $ln 行: $host"
       case "$targets" in *"|$M_TARGET|"*) die "mounts.conf 第 $ln 行: 容器路径重复: $M_TARGET" ;; esac
       targets="$targets$M_TARGET|"
@@ -1033,11 +1037,23 @@ wizard_add_dir() {
 }
 
 wizard_mounts() {
-  local existing="" line p i n cands=() added=0
+  local existing="" missing="" line p i n cands=() added=0
   if [ -f "$MOUNTS_FILE" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do parse_mount_line "$line" && existing="$existing    $(mode_word "$M_MODE")  $M_HOST
-"; done < "$MOUNTS_FILE"
+    while IFS= read -r line || [ -n "$line" ]; do
+      parse_mount_line "$line" || continue
+      if [ -e "$(expand_tilde "$M_HOST")" ]; then existing="$existing    $(mode_word "$M_MODE")  $M_HOST
+"; else missing="$missing$M_HOST
+"; fi
+    done < "$MOUNTS_FILE"
   fi
+  # 已经不存在的文件夹（被删除或移动）直接移除
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    mounts_rm "$p" >/dev/null 2>&1 || true
+    echo "  ${Y}!${N} ${p} 已不存在，已从授权列表移除"
+  done <<EOF2
+$missing
+EOF2
   echo "  选择要交给 AI 的项目文件夹。AI ${B}只能看到这里选的文件夹${N}，电脑上的其它文件对它完全不可见。"
   echo "  ${D}通常选具体的代码项目（如 ~/code/myapp），不能选整个主目录。以后也可以用 $(self_cmd) mounts add <文件夹> 添加。${N}"
   if [ -n "$existing" ]; then
