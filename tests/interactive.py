@@ -104,12 +104,12 @@ print(f'交互式流程（bash {BASH_V}）')
 VL = 'vless://uuid@5.6.7.8:443?type=tcp#日本01'
 TJ = 'trojan://pw@tj.example.com:443?sni=tj.example.com#美国01'
 
-drive('init：粘贴无法识别的内容 → 重新粘贴两条分享链接 → 筛选 → 按编号/路径/拖入授权目录', ['init'], [
+t = drive('init：粘贴无法识别的内容 → 重新粘贴两条分享链接 → 筛选 → 按编号/路径/拖入授权目录', ['init'], [
     (r'请选择 \[1\]: ', '1'),
-    (r'最后再按一次回车结束：', 'hello-world\n'),
+    (r'（空行）结束：', 'hello-world\n'),
     (r'重新输入？.*\[Y/n\]: ', ''),
-    (r'最后再按一次回车结束：', f'{VL}\n{TJ}\n'),
-    (r'节点筛选.*: ', '日本|美国'),
+    (r'（空行）结束：', f'{VL}\n{TJ}\n'),
+    (r'节点关键词.*: ', '德国'), (r'没有节点名包含「德国」[\s\S]*节点关键词.*: ', '日本|美国'),
     (r'1\) ~/code/app\s+2\) ~/projects/site[\s\S]*编号或路径.*: ', '1 2'),
     (r'允许 AI 修改 ~/code/app .*\[Y/n\]: ', ''), (r'允许 AI 修改 ~/projects/site .*\[Y/n\]: ', 'n'),
     (r'继续添加.*: ', f"'{W}/home/docs'"), (r'允许 AI 修改 ~/docs .*: ', 'n'),
@@ -118,6 +118,8 @@ drive('init：粘贴无法识别的内容 → 重新粘贴两条分享链接 →
     (r'继续添加.*: ', ''),
     (r'安装 aibox 命令.*\[Y/n\]: ', 'n'),
 ])
+check('第一次配置不显示“保持当前出口不变”', '保持当前出口不变' not in t)
+check('摘要显示出口和项目权限', '代理：分享链接 2 条，只用名称含「日本|美国」的节点' in t and '~/code/app（可修改）→ 容器里 /workspace/app' in t)
 check('init 写入 2 条分享链接', conf('mihomo/links.txt').count('://') == 2)
 check('init 写入节点筛选', 'AIBOX_NODE_FILTER=日本|美国' in conf('aibox.env'))
 m = conf('mounts.conf')
@@ -126,7 +128,7 @@ check('init 授权的读写权限正确', 'rw  ~/code/app' in m and 'ro  ~/proje
 check('init 不再询问工具、端口、时区、镜像源', 'AIBOX_TOOLS' not in conf('aibox.env') and 'AIBOX_APT_MIRROR' not in conf('aibox.env'))
 
 drive('config：全部回车使用默认值', ['config'], [
-    (r'请选择 \[5\]: ', ''), (r'保留以上授权？ \[Y/n\]: ', ''), (r'继续添加.*: ', ''),
+    (r'请选择 \[5\]: ', ''), (r'保留以上授权？ \[Y/n\]: ', ''), (r'继续添加.*: ', 'n'),
     (r'安装 aibox 命令.*: ', 'n'),
 ])
 check('默认值不改变分享链接', conf('mihomo/links.txt').count('://') == 2)
@@ -136,19 +138,20 @@ drive('config network：粘贴 Clash YAML（本机节点被拒 → 重新粘贴�
     (r'单独一行 END 回车：', '  - { name: 本机, type: socks5, server: 127.0.0.1, port: 7890 }\nEND'),
     (r'重新粘贴？.*\[Y/n\]: ', 'y'),
     (r'单独一行 END 回车：', 'proxies:\n  - { name: 东京01, type: ss, server: 9.9.9.9, port: 8388, cipher: aes-256-gcm, password: x }\nEND'),
-    (r'节点筛选正则.*: ', ''),
+    (r'节点关键词.*: ', ''),
 ])
 check('粘贴 YAML 后删除旧的分享链接', conf('mihomo/links.txt') == '')
 
 drive('config network：WireGuard 文件（先给错误路径）', ['config', 'network'], [
-    (r'请选择 \[\d\]: ', '3'), (r'wg0.conf 文件路径.*: ', W + '/nope.conf'), (r'wg0.conf 文件路径.*: ', W + '/wg.conf'),
+    (r'请选择 \[\d\]: ', '3'), (r'WireGuard 配置文件.*: ', W + '/nope.conf'), (r'WireGuard 配置文件.*: ', f"'{W}/wg.conf'"),
 ])
 check('WireGuard 切换到 gluetun', 'AIBOX_GATEWAY=gluetun' in conf('aibox.env'))
 
 drive('config network：商业 VPN（WireGuard，私钥隐藏输入）', ['config', 'network'], [
-    (r'请选择 \[\d\]: ', '4'), (r'服务商.*: ', 'mullvad'), (r'请选择 \[1\]: ', ''),
-    (r'WireGuard 私钥.*: ', 'secret-key'), (r'WireGuard 地址.*: ', '10.64.0.1/32'), (r'出口国家.*: ', 'Japan'),
+    (r'请选择 \[\d\]: ', '4'), (r'服务商.*: ', 'Mullvad'), (r'请选择 \[1\]: ', ''),
+    (r'私钥 PrivateKey.*: ', 'secret-key'), (r'地址 Address.*: ', '10.64.0.1/32'), (r'出口国家.*: ', 'Japan'),
 ])
+check('服务商名称自动转小写', 'VPN_SERVICE_PROVIDER=mullvad' in conf('gluetun.env'))
 drive('config network：商业 VPN（OpenVPN）', ['config', 'network'], [
     (r'请选择 \[\d\]: ', '4'), (r'服务商.*: ', 'protonvpn'), (r'请选择 \[1\]: ', '2'),
     (r'OpenVPN 用户名.*: ', 'user'), (r'OpenVPN 密码.*: ', 'pass'), (r'出口国家.*: ', ''),

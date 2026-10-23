@@ -104,7 +104,7 @@ if [ "${1:-}" = "--content" ]; then
       | sed -E 's/.*server:[[:space:]]*["'"'"']?//' | while IFS= read -r s; do is_local_server "$s" && echo x; done | grep -c x || true)"
     c_types="$(printf '%s\n' "$c_body" | grep -oE '(^|[[:space:],{])type:[[:space:]]*[A-Za-z0-9-]+' | sed -E 's/.*type:[[:space:]]*//' | sort | uniq -c | awk '{printf "%s:%s ", $2, $1}')"
     c_names="$(printf '%s\n' "$c_body" | grep -oE '(-|\{)[[:space:]]*(\{[[:space:]]*)?name:[[:space:]]*("[^"]*"|'"'"'[^'"'"']*'"'"'|[^,}]*)' \
-      | sed -E 's/.*name:[[:space:]]*//; s/^["'"'"']//; s/["'"'"']$//' | head -12 | tr '\n' '\t')"
+      | sed -E 's/.*name:[[:space:]]*//; s/^["'"'"']//; s/["'"'"']$//' | head -500 | tr '\n' '\t')"
   else
     c_links="$(normalize "$c_f")"
     if printf '%s' "$(tr -d '\r' < "$c_f")" | grep -q '://'; then echo "format=links"; else echo "format=base64"; fi
@@ -113,7 +113,7 @@ if [ "${1:-}" = "--content" ]; then
       c_total=$((c_total + 1))
       h="$(link_host "$l")"; if [ -z "$h" ] || is_local_server "$h"; then c_local=$((c_local + 1)); fi
       c_types="$c_types $(printf '%s' "${l%%://*}" | tr 'A-Z' 'a-z')"
-      [ "$c_total" -le 12 ] && c_names="$c_names$(link_name "$l")	"
+      [ "$c_total" -le 500 ] && c_names="$c_names$(link_name "$l")	"
     done
     c_types="$(printf '%s\n' $c_types | grep . | sort | uniq -c | awk '{printf "%s:%s ", $2, $1}')"
   fi

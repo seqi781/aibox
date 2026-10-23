@@ -598,11 +598,60 @@ import_proxy() {
   write_import_upstream
 }
 
-show_probe_names() {  # 列出部分节点名，方便写筛选正则
-  local n out="" IFS='	'
+probe_names_list() {  # 节点名，每行一个
+  local n IFS='	'
+  for n in $PROBE_NAMES; do [ -n "$n" ] && printf '%s\n' "$(urldecode "$n")"; done
+}
+show_probe_names() {  # 列出部分节点名，方便选关键词
+  local n out="" i=0
   [ -n "$PROBE_NAMES" ] || return 0
-  for n in $PROBE_NAMES; do [ -n "$n" ] && out="$out  $(urldecode "$n")"; done
-  echo "  ${D}节点示例:${out}${N}"
+  while IFS= read -r n; do i=$((i + 1)); [ "$i" -le 12 ] && out="$out  $n"; done <<EOF2
+$(probe_names_list)
+EOF2
+  [ "$i" -gt 12 ] && out="$out  ……"
+  echo "  ${D}节点名:${out}${N}"
+}
+
+# 向导里问节点关键词（AIBOX_NODE_FILTER），能拿到节点名时先在本地检查能匹配几个
+ask_filter() {
+  local f names n rc def
+  names="$(probe_names_list)"
+  def="$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
+  # 原来的关键词匹配不到这次的节点时，不再作为默认值
+  if [ -n "$def" ] && [ -n "$names" ] && ! printf '%s\n' "$names" | grep -qE -- "$def" 2>/dev/null; then def=""; fi
+  echo "  ${D}只用部分节点？输入节点名里的关键词，多个用 | 分隔，如 美国|US 或 日本|JP"
+  echo "  直接回车 = 使用全部节点（自动用第一个能连上的，断了自动换下一个）"
+  echo "  注意：Claude / ChatGPT 不支持中国大陆、香港、澳门、俄罗斯等地区，不要选这些地区的节点${N}"
+  while :; do
+    ask f "节点关键词" "$def"
+    [ -n "$f" ] && [ -n "$names" ] || break
+    rc=0; n="$(printf '%s\n' "$names" | grep -cE -- "$f" 2>/dev/null)" || rc=$?
+    if [ "$rc" -gt 1 ]; then echo "  ${Y}关键词格式有误（括号、方括号要成对）${N}"; continue; fi
+    if [ "${n:-0}" = 0 ]; then echo "  ${Y}没有节点名包含「${f}」，换一个关键词，或直接回车使用全部节点${N}"; def=""; continue; fi
+    echo "  ${G}✔${N} 匹配 ${n} 个节点"; break
+  done
+  set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$f"
+}
+
+# 一句话描述当前出口（向导和摘要用）；未配置时返回 1
+exit_desc() {
+  local gw prov subs links f
+  gw="$(get_kv "$ENV_FILE" AIBOX_GATEWAY 2>/dev/null)"
+  if [ "$gw" = gluetun ]; then
+    prov="$(get_kv "$CONF/gluetun.env" VPN_SERVICE_PROVIDER 2>/dev/null)"
+    [ -n "$prov" ] || return 1
+    if [ "$prov" = custom ]; then echo "自建 WireGuard VPN"; else echo "VPN 服务 ${prov}（$(get_kv "$CONF/gluetun.env" VPN_TYPE)）"; fi
+    return 0
+  fi
+  sh "$VALIDATOR" "$UPSTREAM_FILE" >/dev/null 2>&1 || return 1
+  subs="$(grep -cE '^[[:space:]]+type:[[:space:]]*http' "$UPSTREAM_FILE" 2>/dev/null || true)"
+  links="$( { grep -c '://' "$LINKS_FILE" 2>/dev/null || true; } | head -1)"
+  f="$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER 2>/dev/null)"
+  if [ "${subs:-0}" -gt 0 ] && [ "${links:-0}" -gt 0 ]; then printf '代理：订阅 %s 个 + 分享链接 %s 条' "$subs" "$links"
+  elif [ "${subs:-0}" -gt 0 ]; then printf '代理：订阅 %s 个' "$subs"
+  elif [ "${links:-0}" -gt 0 ]; then printf '代理：分享链接 %s 条' "$links"
+  else printf '代理：手动粘贴的节点'; fi
+  if [ -n "$f" ]; then echo "，只用名称含「${f}」的节点"; else echo "，使用全部节点"; fi
 }
 
 write_sub_upstream() {  # write_sub_upstream URL...（兼容旧调用；不做预下载检查）
@@ -822,6 +871,9 @@ proxy_test() {
     geo_save
     echo "  ${G}✔${N} 出口 IP：${GEO_IP}（$(geo_where) · ${GEO_ORG}）  当前节点：${now:-?}"
     echo "  ${G}✔${N} 容器的时区和语言将按出口地区设置：$(geo_tz) · $(geo_lang)"
+    if ai_unsupported_region "${GEO_CC:-}"; then
+      echo "  ${Y}!${N} 出口在 ${GEO_CC}：Claude / ChatGPT 不支持这个地区，建议用节点关键词换成其它地区的节点"
+    fi
   else
     echo "  ${Y}!${N} 节点可用，但查不到出口 IP 的地区（ipinfo.io / ip-api.com 都无法访问）"
   fi
@@ -845,19 +897,26 @@ cmd_test() {
 }
 
 wizard_network() {
-  local cur def opt url n=1 more filter body line
-  cur="$(get_kv "$ENV_FILE" AIBOX_GATEWAY)"; cur="${cur:-mihomo}"
-  def=1
-  if [ "$cur" = gluetun ] || sh "$VALIDATOR" "$UPSTREAM_FILE" >/dev/null 2>&1; then
-    def=5; echo "  当前: $([ "$cur" = gluetun ] && echo "VPN（gluetun）" || echo "代理（mihomo，upstream.yaml 已配置）")"
+  local cur opt url n=1 more body line keep
+  echo "  容器的所有网络流量都只走这里配置的代理或 VPN；它断开时容器直接断网，不会改用你电脑的网络。"
+  echo "  ${D}（不能用电脑上正在运行的 Clash / v2rayN 等软件，需要它们使用的订阅链接或节点）${N}"
+  if cur="$(exit_desc)"; then
+    keep="选 n 则保留原来的出口"
+    echo "  当前出口: ${cur}"
+    choose opt 5 \
+      "订阅链接或节点分享链接（推荐，自动识别 Clash、v2rayN、Shadowrocket 等格式）" \
+      "手动粘贴节点（Clash YAML 格式的 proxies 列表）" \
+      "WireGuard 配置文件（自建 VPN）" \
+      "VPN 服务商账号（Mullvad / ProtonVPN / Surfshark 等）" \
+      "保持当前出口不变"
+  else
+    keep="选 n 先跳过，之后用 aibox import <订阅链接> 配置"
+    choose opt 1 \
+      "订阅链接或节点分享链接（推荐，自动识别 Clash、v2rayN、Shadowrocket 等格式）" \
+      "手动粘贴节点（Clash YAML 格式的 proxies 列表）" \
+      "WireGuard 配置文件（自建 VPN）" \
+      "VPN 服务商账号（Mullvad / ProtonVPN / Surfshark 等）"
   fi
-  echo "  所有流量都将强制经过这里配置的出口；断线时容器断网，不会回落直连。"
-  choose opt "$def" \
-    "订阅链接或节点分享链接（自动识别 Clash、v2rayN、Shadowrocket 等格式，推荐）" \
-    "手动粘贴节点（Clash YAML 格式的 proxies 列表）" \
-    "WireGuard 配置文件（自建 VPN）" \
-    "商业 VPN 服务（Mullvad / ProtonVPN / Surfshark 等）" \
-    "保持现有配置"
   case "$opt" in
     1)
       echo "  ${D}支持：订阅链接（https://…）、分享链接（vmess:// vless:// ss:// trojan:// hysteria2:// 等）、"
@@ -865,7 +924,7 @@ wizard_network() {
       echo "        v2rayN：订阅分组里复制订阅地址，或选中节点后“导出分享链接到剪贴板”。${N}"
       local input
       while :; do
-        echo "  粘贴后回车；可以粘贴多条（每行一条），最后再按一次回车结束："
+        echo "  粘贴后按回车。可以粘贴多条（每行一条），全部粘贴完再按一次回车（空行）结束："
         input=""
         while IFS= read -e -r line; do line="$(trim "$line")"; [ -n "$line" ] || break; input="$input$line
 "; done
@@ -874,12 +933,10 @@ wizard_network() {
         snap_save
         if import_proxy "$input"; then
           show_probe_names
-          echo "  ${D}可以用正则只选部分节点，例如 日本|JP 或 香港|HK；直接回车表示全部节点自动择优${N}"
-          ask filter "节点筛选" "$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
-          set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"; set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo
+          ask_filter; set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo
           wizard_test && { snap_drop; break; }
         fi
-        if ! yesno "重新输入？（选 n 则保持原来的配置）" y; then snap_restore; return 0; fi
+        if ! yesno "重新输入？（${keep}）" y; then snap_restore; return 0; fi
         snap_restore
       done ;;
     2)
@@ -890,18 +947,18 @@ wizard_network() {
 "; done
         snap_save
         if write_nodes_upstream "$body"; then
-          ask filter "节点筛选正则（留空=全部）" "$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
-          set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"; set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo
+          PROBE_NAMES="$(sh "$VALIDATOR" --content "$UPSTREAM_FILE" 2>/dev/null | sed -n 's/^names=//p')"
+          ask_filter; set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo
           wizard_test && { snap_drop; break; }
         fi
-        if ! yesno "重新粘贴？（选 n 则保持原来的配置）" y; then snap_restore; return 0; fi
+        if ! yesno "重新粘贴？（${keep}）" y; then snap_restore; return 0; fi
         snap_restore
       done ;;
     3)
       local wg
       while :; do
-        ask_path wg "wg0.conf 文件路径（支持 Tab 补全）"
-        wg="$(expand_tilde "$wg")"
+        ask_path wg "WireGuard 配置文件（.conf）的路径（可把文件拖进这个窗口，支持 Tab 补全）"
+        wg="$(expand_tilde "$(clean_input_path "$wg")")"
         if [ -f "$wg" ] && grep -q '^\[Interface\]' "$wg" && grep -q '^\[Peer\]' "$wg" && grep -qi '^Endpoint' "$wg"; then break; fi
         echo "  不是有效的 WireGuard 配置（需要 [Interface]、[Peer] 和 Endpoint）"
       done
@@ -910,16 +967,19 @@ wizard_network() {
     4)
       local prov vt key addr user pass countries
       echo "  ${D}服务商名称见 https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers${N}"
-      ask prov "服务商（小写，如 mullvad / protonvpn / surfshark / nordvpn）"
+      ask prov "服务商（如 mullvad / protonvpn / surfshark / nordvpn）"
+      prov="$(printf '%s' "$prov" | tr 'A-Z ' 'a-z ')"
       echo "  协议:"; choose vt 1 "WireGuard（推荐）" "OpenVPN"
       key=""; addr=""; user=""; pass=""
       if [ "$vt" = 1 ]; then
-        ask_secret key "WireGuard 私钥 (WIREGUARD_PRIVATE_KEY)"
-        ask addr "WireGuard 地址 (WIREGUARD_ADDRESSES，如 10.64.0.1/32)"
+        echo "  ${D}在服务商网站生成一个 WireGuard 配置文件，下面两项从里面复制（PrivateKey 和 Address）${N}"
+        ask_secret key "私钥 PrivateKey"
+        ask addr "地址 Address（如 10.64.0.1/32）"
       else
+        echo "  ${D}OpenVPN 用户名和密码通常不是网站登录密码，在服务商网站的 OpenVPN / 手动配置页面查看${N}"
         ask user "OpenVPN 用户名"; ask_secret pass "OpenVPN 密码"
       fi
-      ask countries "出口国家（英文，如 Japan,Singapore；留空=自动）"
+      ask countries "出口国家（英文，多个用逗号分隔，如 Japan,Singapore；直接回车 = 自动）"
       write_provider_vpn "$prov" "$([ "$vt" = 1 ] && echo wireguard || echo openvpn)" "$key" "$addr" "$user" "$pass" "$countries" || return 1
       echo "  已写入 config/gluetun.env（其它高级选项可手动编辑）" ;;
     5) : ;;
@@ -979,7 +1039,7 @@ wizard_mounts() {
 "; done < "$MOUNTS_FILE"
   fi
   echo "  选择要交给 AI 的项目文件夹。AI ${B}只能看到这里选的文件夹${N}，电脑上的其它文件对它完全不可见。"
-  echo "  ${D}通常选具体的代码项目（如 ~/code/myapp），不能选整个主目录。以后也可以用 aibox mounts add <文件夹> 添加。${N}"
+  echo "  ${D}通常选具体的代码项目（如 ~/code/myapp），不能选整个主目录。以后也可以用 $(self_cmd) mounts add <文件夹> 添加。${N}"
   if [ -n "$existing" ]; then
     echo "  已授权:"; printf '%s' "$existing"
     if ! yesno "保留以上授权？" y; then
@@ -1005,6 +1065,7 @@ EOF2
     fi
     [ -n "$p" ] || break
     case "$p" in
+      n|N|no|q|否|没有|不要) break ;;
       *[!0-9\ ,]*)   # 路径
         wizard_add_dir "$(clean_input_path "$p")" && added=1 ;;
       *)             # 编号
@@ -1028,17 +1089,49 @@ EOF2
 
 # 向导里测试刚配置的代理（Docker 不可用时跳过）。测试失败返回 1
 wizard_test() {
-  if [ "${WIZ_DOCKER:-0}" != 1 ]; then echo "  ${D}Docker 尚未就绪，跳过节点测试（之后运行 aibox test）${N}"; return 0; fi
-  ( load_env; proxy_test ) && return 0
-  echo "  ${Y}节点测试没有通过${N}"; return 1
+  if [ "${WIZ_DOCKER:-0}" != 1 ]; then echo "  ${D}Docker 尚未就绪，跳过节点测试（之后运行 $(self_cmd) test）${N}"; return 0; fi
+  if ! ( load_env; proxy_test ); then echo "  ${Y}节点测试没有通过${N}"; return 1; fi
+  if geo_load 2>/dev/null && ai_unsupported_region "${GEO_CC:-}"; then
+    yesno "出口地区不受 AI 服务支持，重新配置出口？（n = 仍然使用）" y && return 1
+  fi
+  return 0
 }
 
 wizard_summary() {
-  local gw; gw="$(get_kv "$ENV_FILE" AIBOX_GATEWAY)"
-  echo; echo "${B}配置完成${N}（保存在 config/，可随时运行 ${B}aibox config${N} 修改）"
-  echo "  出口:   $([ "$gw" = gluetun ] && echo "VPN（gluetun，$(get_kv "$CONF/gluetun.env" VPN_SERVICE_PROVIDER)）" || echo "代理（mihomo）  节点筛选: $(get_kv "$ENV_FILE" AIBOX_NODE_FILTER | grep . || echo 全部)")"
+  local d line any=0
+  echo; echo "${B}配置完成${N}（保存在 config/，可随时运行 ${B}$(self_cmd) config${N} 修改）"
+  if d="$(exit_desc)"; then echo "  出口:   ${d}"; else echo "  出口:   ${Y}未配置（启动前必须配置: $(self_cmd) import <订阅链接>）${N}"; fi
   geo_load 2>/dev/null && echo "  地区:   $(geo_where) → 时区 $(geo_tz)，语言 $(geo_lang)（按出口 IP 自动设置）"
-  echo "  项目:   $(list_projects | paste -sd' ' - | grep . || echo "（未授权任何目录）")"
+  if [ -f "$MOUNTS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      parse_mount_line "$line" || continue
+      if [ "$any" = 0 ]; then printf '  项目:   '; else printf '          '; fi
+      echo "${M_HOST}（$(mode_word "$M_MODE")）→ 容器里 ${M_TARGET}"; any=1
+    done < "$MOUNTS_FILE"
+  fi
+  [ "$any" = 1 ] || echo "  项目:   ${Y}未选择任何文件夹（AI 看不到你的项目: $(self_cmd) mounts add <文件夹>）${N}"
+}
+
+# 给用户看的命令名：装好了就用 ai，否则用 aibox 的完整路径
+self_cmd() {
+  if [ "$(readlink "$(command -v ai 2>/dev/null)" 2>/dev/null)" = "$ROOT/aibox" ]; then echo ai
+  elif [ "$(readlink "$(command -v aibox 2>/dev/null)" 2>/dev/null)" = "$ROOT/aibox" ]; then echo aibox
+  else tilde_path "$ROOT/aibox"; fi
+}
+
+# 向导最后：告诉用户怎么开始用
+wizard_next() {
+  local proj="" line c
+  c="$(self_cmd)"
+  if [ -f "$MOUNTS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do parse_mount_line "$line" && { proj="$M_HOST"; break; }; done < "$MOUNTS_FILE"
+  fi
+  echo; echo "${B}开始使用${N}（在你平时用的终端里）:"
+  [ "${WIZ_INSTALLED:-0}" = 1 ] && [ "$c" != ai ] && { echo "  ${D}先新开一个终端窗口，ai 命令才会生效${N}"; c=ai; }
+  [ -n "$proj" ] && echo "  cd ${proj}"
+  echo "  ${B}${c} claude${N}     ${D}# 启动 Claude Code（第一次运行时自动安装；Codex 用 ${c} codex）${N}"
+  if [ "$c" = ai ]; then echo "  ${B}ai${N}            ${D}# 进入容器终端，exit 退出${N}"
+  else echo "  ${B}${c} shell${N}      ${D}# 进入容器终端，exit 退出${N}"; fi
 }
 
 cmd_wizard() {
@@ -1054,24 +1147,31 @@ cmd_wizard() {
     WIZ_DOCKER=1
     echo "  Docker: ${G}✔${N} $(docker version -f '{{.Server.Version}}' 2>/dev/null)  Compose: $(docker compose version --short 2>/dev/null)"
   else
-    ( need_docker ) || true
-    echo "  ${Y}Docker 尚未就绪，可以先完成配置，修复后再运行 aibox up${N}"
+    echo "  Docker: ${Y}未就绪${N}"
+    ( R=; N=; need_docker ) 2>&1 | sed 's/^错误: //; s/^ *//; s/^/    /' || true
+    echo "  ${D}可以先完成下面的配置；Docker 就绪后再启动，节点测试也会留到那时${N}"
     start=no
   fi
   step 2 "网络出口";   until wizard_network; do echo "  ${Y}未保存，请重新选择${N}"; done
   step 3 "选择项目文件夹"; wizard_mounts
   fix_owner "$CONF"
   wizard_summary
+  WIZ_INSTALLED=0
   if [ "$HOST_OS" != windows ] && ! command -v aibox >/dev/null 2>&1; then
-    echo; yesno "安装 aibox 命令（以后在任意目录直接输入 aibox / ai）？" y && cmd_install || true
+    echo; yesno "安装 aibox 命令（以后在任意目录直接输入 aibox 或简写 ai）？" y && { cmd_install && WIZ_INSTALLED=1 || true; }
   fi
-  [ "$start" = no ] && { echo; echo "下一步: ${B}aibox up${N}，然后 ${B}aibox report${N} 查看环境检测报告"; return 0; }
+  if ! exit_desc >/dev/null; then
+    echo; echo "下一步: 配置出口 ${B}$(self_cmd) import <订阅链接>${N}，然后 ${B}$(self_cmd) up${N}"; return 0
+  fi
+  [ "$start" = no ] && { echo; echo "下一步: Docker 就绪后运行 ${B}$(self_cmd) up${N}，然后 ${B}$(self_cmd) report${N} 查看环境检测报告"; return 0; }
   [ "$start" = ask ] || return 0
   echo
-  if yesno "现在启动？（首次需构建镜像，约 3-5 分钟）" y; then
+  if yesno "现在启动？（第一次需要构建镜像，约 3-5 分钟）" y; then
     cmd_up
     echo; ( cmd_report ) || true
-    echo; echo "开始使用: ${B}aibox claude${N} <项目>  或  ${B}aibox codex${N} <项目>（第一次运行时自动安装）  终端: ${B}aibox shell${N}"
+    wizard_next
+  else
+    echo; echo "之后运行 ${B}$(self_cmd) up${N} 启动"
   fi
 }
 
