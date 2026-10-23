@@ -31,7 +31,13 @@ run 0 bash ./aibox help
 
 # ---------- 基本 ----------
 run 0 ./aibox help
+run 0 ./aibox
+run 0 ./aibox help --all
+expect "aibox 只列出给人用的命令" sh -c './aibox | grep -q "aibox tmux" && ! ./aibox | grep -qE "import|report|mounts"'
+expect "help --all 列出全部命令" sh -c './aibox help --all | grep -q "import" && ./aibox help --all | grep -q "report"'
 run 1 ./aibox no-such-cmd
+run 1 ./aibox c
+run 1 ./aibox tmux --bad
 run 0 ./aibox init --defaults
 run 0 ./aibox init --defaults
 run 0 ./aibox config help
@@ -146,7 +152,7 @@ run 1 ./aibox config mounts
 
 # ---------- install（非终端：不提问） ----------
 run 0 env PATH="$HOME/.local/bin:/usr/bin:/bin" ./aibox install
-expect "install 创建 aibox 和 ai 链接" test -L "$HOME/.local/bin/aibox" -a -L "$HOME/.local/bin/ai"
+expect "install 只创建 aibox 链接" test -L "$HOME/.local/bin/aibox" -a ! -e "$HOME/.local/bin/ai"
 run 0 env PATH="/usr/bin:/bin" SHELL=/bin/zsh ./aibox install
 expect "PATH 里没有可写目录时装到 ~/.local/bin" [ -L "$HOME/.local/bin/aibox" ]
 

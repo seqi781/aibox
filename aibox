@@ -1112,10 +1112,9 @@ wizard_summary() {
   [ "$any" = 1 ] || echo "  项目:   ${Y}未选择任何文件夹（AI 看不到你的项目: $(self_cmd) mounts add <文件夹>）${N}"
 }
 
-# 给用户看的命令名：装好了就用 ai，否则用 aibox 的完整路径
+# 给用户看的命令名：装好了就用 aibox，否则用 aibox 的完整路径
 self_cmd() {
-  if [ "$(readlink "$(command -v ai 2>/dev/null)" 2>/dev/null)" = "$ROOT/aibox" ]; then echo ai
-  elif [ "$(readlink "$(command -v aibox 2>/dev/null)" 2>/dev/null)" = "$ROOT/aibox" ]; then echo aibox
+  if [ "$(readlink "$(command -v aibox 2>/dev/null)" 2>/dev/null)" = "$ROOT/aibox" ]; then echo aibox
   else tilde_path "$ROOT/aibox"; fi
 }
 
@@ -1127,11 +1126,11 @@ wizard_next() {
     while IFS= read -r line || [ -n "$line" ]; do parse_mount_line "$line" && { proj="$M_HOST"; break; }; done < "$MOUNTS_FILE"
   fi
   echo; echo "${B}开始使用${N}（在你平时用的终端里）:"
-  [ "${WIZ_INSTALLED:-0}" = 1 ] && [ "$c" != ai ] && { echo "  ${D}先新开一个终端窗口，ai 命令才会生效${N}"; c=ai; }
+  [ "${WIZ_INSTALLED:-0}" = 1 ] && [ "$c" != aibox ] && { echo "  ${D}先新开一个终端窗口，aibox 命令才会生效${N}"; c=aibox; }
   [ -n "$proj" ] && echo "  cd ${proj}"
-  echo "  ${B}${c} claude${N}     ${D}# 启动 Claude Code（第一次运行时自动安装；Codex 用 ${c} codex）${N}"
-  if [ "$c" = ai ]; then echo "  ${B}ai${N}            ${D}# 进入容器终端，exit 退出${N}"
-  else echo "  ${B}${c} shell${N}      ${D}# 进入容器终端，exit 退出${N}"; fi
+  echo "  ${B}${c} claude${N}    ${D}# 启动 Claude Code（第一次运行时自动安装；Codex 用 ${c} codex）${N}"
+  echo "  ${B}${c} tmux${N}      ${D}# 可恢复的会话：关掉终端窗口程序也继续运行${N}"
+  echo "  ${B}${c}${N}           ${D}# 查看全部常用命令${N}"
 }
 
 cmd_wizard() {
@@ -1158,7 +1157,7 @@ cmd_wizard() {
   wizard_summary
   WIZ_INSTALLED=0
   if [ "$HOST_OS" != windows ] && ! command -v aibox >/dev/null 2>&1; then
-    echo; yesno "安装 aibox 命令（以后在任意目录直接输入 aibox 或简写 ai）？" y && { cmd_install && WIZ_INSTALLED=1 || true; }
+    echo; yesno "安装 aibox 命令（以后在任意目录直接输入 aibox）？" y && { cmd_install && WIZ_INSTALLED=1 || true; }
   fi
   if ! exit_desc >/dev/null; then
     echo; echo "下一步: 配置出口 ${B}$(self_cmd) import <订阅链接>${N}，然后 ${B}$(self_cmd) up${N}"; return 0
@@ -1457,16 +1456,30 @@ term_args() {
   TERM_ARGS+=(${GEO_ARGS[@]+"${GEO_ARGS[@]}"})
 }
 
-# 进入容器终端：默认直接用你的系统终端（和 ssh 登录一台机器一样）；--tmux 时进入可恢复的 tmux 会话
+# 可恢复的会话：每个项目一个 tmux 会话。关掉终端窗口后里面的程序继续运行，再次运行同一命令回到原处
+cmd_tmux() {
+  local arg="" dir sess
+  while [ $# -gt 0 ]; do
+    case "$1" in -*) die "用法: aibox tmux [项目]" ;; *) arg="$1" ;; esac; shift
+  done
+  ensure_up; dir="$(resolve_project "$arg")"; term_args
+  sess="$(session_name "$(basename "$dir")")"
+  if docker exec "$WS" tmux has-session -t "=$sess" 2>/dev/null; then
+    info "回到会话 ${sess}"
+  else
+    info "新建会话 ${sess}：在里面运行 claude / codex；先按 Ctrl+b 再按 d 离开（程序继续运行），再次运行 aibox tmux 回来"
+  fi
+  exec docker exec $TTY_FLAG "${TERM_ARGS[@]}" -w "$dir" "$WS" tmux new-session -A -s "$sess" -c "$dir"
+}
+
+# 进入容器终端：直接用你的系统终端（和 ssh 登录一台机器一样）
 cmd_shell() {
   local arg="" tmux=0 dir
   while [ $# -gt 0 ]; do
     case "$1" in --tmux) tmux=1 ;; --bash|--no-tmux) tmux=0 ;; -*) die "未知参数 $1（可用: --tmux）" ;; *) arg="$1" ;; esac; shift
   done
   ensure_up; dir="$(resolve_project "$arg")"; term_args
-  if [ "$tmux" = 1 ]; then
-    exec docker exec $TTY_FLAG "${TERM_ARGS[@]}" -w "$dir" "$WS" tmux new-session -A -s "$(session_name "${arg:-main}")" -c "$dir"
-  fi
+  if [ "$tmux" = 1 ]; then cmd_tmux ${arg:+"$arg"}; fi
   exec docker exec $TTY_FLAG "${TERM_ARGS[@]}" -w "$dir" "$WS" bash -l
 }
 
@@ -1575,9 +1588,9 @@ cmd_destroy() {
   info "已清除"
 }
 
-# 安装到 PATH：aibox 与短命令（默认 ai），并可选添加 Tab 补全
+# 安装到 PATH，并可选添加 Tab 补全
 cmd_install() {
-  local short="${1:-ai}" dir="" d SUDO="" add_path=0
+  local dir="" d SUDO="" add_path=0
   # 优先选：在 PATH 中、已存在、当前用户可写的目录
   for d in "$USER_HOME/.local/bin" /opt/homebrew/bin /usr/local/bin; do
     case ":$PATH:" in *":$d:"*) [ -d "$d" ] && [ -w "$d" ] && { dir="$d"; break; } ;; esac
@@ -1592,14 +1605,6 @@ cmd_install() {
     case ":$PATH:" in *":$dir:"*) ;; *) add_path=1 ;; esac
   fi
   $SUDO ln -sf "$ROOT/aibox" "$dir/aibox" || die "无法写入 $dir"; echo "  已安装: $dir/aibox"
-  if [ "$short" != none ]; then
-    local existing; existing="$(command -v "$short" 2>/dev/null || true)"
-    if [ -n "$existing" ] && [ "$(readlink "$existing" 2>/dev/null)" != "$ROOT/aibox" ]; then
-      warn "短命令 $short 已被占用（${existing}），未覆盖。可指定其它名字: aibox install <名字>"
-    else
-      $SUDO ln -sf "$ROOT/aibox" "$dir/$short"; echo "  已安装: $dir/${short}（aibox 的简写）"
-    fi
-  fi
 
   # shell 配置文件：zsh → ~/.zshrc；macOS 上的 bash 终端是登录 shell，读 ~/.bash_profile
   local shell_name rc
@@ -1621,7 +1626,7 @@ cmd_install() {
 }
 
 cmd_completion() {
-  local cmds="init import test report config up shell claude codex gemini opencode sessions exec stop restart down status doctor mounts logs setup rebuild guide install destroy help"
+  local cmds="init claude codex shell tmux status stop restart doctor config help"
   case "${1:-bash}" in
     zsh) cat <<EOF
 # macOS 自带的 zsh 默认没有启用补全系统；没有 compdef 时先初始化
@@ -1630,13 +1635,13 @@ _aibox() {
   local -a cmds; cmds=(${cmds})
   if (( CURRENT == 2 )); then compadd -a cmds; return; fi
   case \$words[2] in
-    claude|codex|gemini|opencode|shell|c|x|cx|s) (( CURRENT == 3 )) && compadd -- \$(aibox projects 2>/dev/null) ;;
+    claude|codex|gemini|opencode|shell|tmux) (( CURRENT == 3 )) && compadd -- \$(aibox projects 2>/dev/null) ;;
     mounts) (( CURRENT == 3 )) && compadd list add rm ;;
     config) (( CURRENT == 3 )) && compadd show check test set get edit proxy vpn network mounts key help ;;
     logs) compadd gateway workspace ;;
   esac
 }
-compdef _aibox aibox ai
+compdef _aibox aibox
 EOF
     ;;
     bash) cat <<EOF
@@ -1644,13 +1649,13 @@ _aibox() {
   local cur=\${COMP_WORDS[COMP_CWORD]}
   if [ \$COMP_CWORD -eq 1 ]; then COMPREPLY=(\$(compgen -W "${cmds}" -- "\$cur")); return; fi
   case \${COMP_WORDS[1]} in
-    claude|codex|gemini|opencode|shell|c|x|cx|s) [ \$COMP_CWORD -eq 2 ] && COMPREPLY=(\$(compgen -W "\$(aibox projects 2>/dev/null)" -- "\$cur")) ;;
+    claude|codex|gemini|opencode|shell|tmux) [ \$COMP_CWORD -eq 2 ] && COMPREPLY=(\$(compgen -W "\$(aibox projects 2>/dev/null)" -- "\$cur")) ;;
     mounts) COMPREPLY=(\$(compgen -W "list add rm" -- "\$cur")) ;;
     config) COMPREPLY=(\$(compgen -W "show check test set get edit proxy vpn network mounts key help" -- "\$cur")) ;;
     logs) COMPREPLY=(\$(compgen -W "gateway workspace" -- "\$cur")) ;;
   esac
 }
-complete -F _aibox aibox ai
+complete -F _aibox aibox
 EOF
     ;;
     *) die "用法: aibox completion bash|zsh" ;;
@@ -1758,7 +1763,10 @@ cmd_doctor() {
 $MOUNT_LIST
 EOF
   echo
-  if [ "$FAIL" -eq 0 ]; then echo "${G}${B}全部通过${N} ($PASS 项)"; else echo "${R}${B}$FAIL 项失败${N}, $PASS 项通过"; exit 1; fi
+  if [ "$FAIL" -eq 0 ]; then echo "${G}${B}全部通过${N} ($PASS 项)"; else echo "${R}${B}$FAIL 项失败${N}, $PASS 项通过"; fi
+  # 再附上环境检测报告（出口 IP 类型与风险、DNS、时区一致性、综合判定）
+  if [ "${AIBOX_DOCTOR_NO_REPORT:-}" != 1 ]; then echo; ( cmd_report ) || true; fi
+  [ "$FAIL" -eq 0 ] || exit 1
 }
 
 # ---------- 环境检测报告：本机 / 出口 IP / IP 类型与风险 / DNS / 一致性 / 综合结论 ----------
@@ -1963,8 +1971,26 @@ cmd_report() {
 
 usage() {
   cat <<EOF
+${B}aibox${N} — 在 Docker 里运行 Claude Code / Codex，网络只走你配置的代理或 VPN
+
+  ${B}aibox init${N}              第一次使用：配置向导（网络出口、项目文件夹），完成后启动
+  ${B}aibox claude${N} [项目]     启动 Claude Code（第一次运行时自动安装）
+  ${B}aibox codex${N}  [项目]     启动 Codex
+  ${B}aibox shell${N}  [项目]     进入容器终端
+  ${B}aibox tmux${N}   [项目]     进入可恢复的会话：关掉终端窗口，里面的程序也继续运行
+  ${B}aibox status${N}            查看运行状态和出口 IP
+  ${B}aibox stop${N} / ${B}restart${N}    停止 / 重启（修改配置后用 restart 生效）
+  ${B}aibox doctor${N}            检查网络、断网保护和环境风险
+  ${B}aibox config${N}            修改配置（网络出口、项目文件夹）
+
+不写项目名时，先在终端里 cd 到项目文件夹再运行。
+${D}给 AI agent 和脚本用的完整命令: aibox help --all${N}
+EOF
+}
+usage_all() {
+  cat <<EOF
 ${B}aibox${N} — Docker 中的 AI 编程终端（Claude Code / Codex），网络强制走代理/VPN
-短命令 ${B}ai${N} 与 aibox 等价（aibox install 安装）
+完整命令（供 AI agent / 脚本使用；给人看的常用命令见 aibox help）
 
 ${B}开始${N}
   init                  配置向导（首次使用）        ${D}--defaults 生成默认配置不提问${N}
@@ -1973,66 +1999,66 @@ ${B}开始${N}
   guide                 配置与使用指南（人和 agent 通用）
 
 ${B}一键导入出口${N}（自动识别订阅、v2rayN/Shadowrocket 分享链接、clash:// 导入链接、Base64）
-  import "<链接>" [更多链接…] [--filter 正则]   pbpaste | aibox import -   （简写 i）
-  test                  测试节点：可用数量、延迟、出口 IP 和地区                    t
+  import "<链接>" [更多链接…] [--filter 正则]   pbpaste | aibox import -
+  test                  测试节点：可用数量、延迟、出口 IP 和地区
 
 ${B}非交互配置${N}（不提问，失败返回非 0 且不改动原配置）
   config proxy --sub <订阅链接> [--filter 正则]     config vpn --wireguard <wg0.conf>
   mounts add [rw|ro] <路径>    mounts rm <名字>     config key <变量名>（值从标准输入读取）
   config check                 config show           config set AIBOX_<键> <值>
 
-${B}日常${N}                                                    ${D}简写${N}
+${B}日常${N}
   （不写项目名时：当前目录在授权目录里，就进入容器里对应的位置）
-  claude [项目] [参数]  启动 Claude Code（第一次自动安装）                 c
-  codex  [项目] [参数]  在项目目录启动 Codex                              x
+  claude [项目] [参数]  启动 Claude Code（第一次自动安装）
+  codex  [项目] [参数]  在项目目录启动 Codex
         --yolo          跳过逐条确认（容器即沙箱）
         --tmux          放进 tmux 会话：关掉终端也继续运行，再次运行同一命令回来（--new 再开一个）
-  shell  [项目]         进入容器终端（直接用你的系统终端；--tmux 同上）   s，或只输入 ai
-  sessions              列出 --tmux 会话                                  ls
+  shell  [项目]         进入容器终端（直接用你的系统终端；--tmux 同上）
+  sessions              列出 --tmux 会话
   exec <命令...>        在容器中执行一条命令
-  status                状态、出口 IP、会话                               st
-  stop | restart        停止 / 重启（数据保留）                           q
+  status                状态、出口 IP、会话
+  stop | restart        停止 / 重启（数据保留）
 
 ${B}管理${N}
   mounts [add|rm]       授权目录: aibox mounts add ro ~/docs | aibox mounts rm docs
-  report                环境检测报告：本机/出口 IP、IP 类型与风险、DNS、一致性、综合判定   r
-  doctor [--full]       网络与挂载体检（--full 含断线阻断测试）           d
+  report                环境检测报告：本机/出口 IP、IP 类型与风险、DNS、一致性、综合判定
+  doctor [--full]       网络与挂载体检（--full 含断线阻断测试）
   logs [gateway|workspace]   setup <工具…> | --upgrade   rebuild   down   destroy
-  install [短命令名]    安装到 PATH（默认短命令 ai）并添加 Tab 补全
+  install               安装到 PATH 并添加 Tab 补全
+  tmux [项目]           可恢复的会话（tmux）
 EOF
 }
 
-# 用短命令 ai 且不带参数时，直接进入终端（当前目录在授权目录里就进入对应位置）
-if [ $# -eq 0 ] && [ "$(basename "$0")" != aibox ]; then set -- shell; fi
 cmd="${1:-help}"; [ $# -gt 0 ] && shift
 case "$cmd" in
   init) cmd_init "$@" ;;
-  config|cfg) cmd_config "$@" ;;
-  import|i) cmd_config proxy "$@" ;;
-  test|t) cmd_test ;;
-  up|start|u) cmd_up "$@" ;;
-  shell|enter|sh|s) cmd_shell "$@" ;;
-  claude|c) cmd_agent claude "$@" ;;
-  codex|x|cx) cmd_agent codex "$@" ;;
+  config) cmd_config "$@" ;;
+  import) cmd_config proxy "$@" ;;
+  test) cmd_test ;;
+  up) cmd_up "$@" ;;
+  shell) cmd_shell "$@" ;;
+  claude) cmd_agent claude "$@" ;;
+  codex) cmd_agent codex "$@" ;;
   gemini) cmd_agent gemini "$@" ;;
   opencode) cmd_agent opencode "$@" ;;
-  sessions|ls) cmd_sessions ;;
-  exec|run) cmd_exec "$@" ;;
-  stop|q) cmd_stop ;;
+  sessions) cmd_sessions ;;
+  exec) cmd_exec "$@" ;;
+  stop) cmd_stop ;;
   restart) cmd_restart ;;
   down) cmd_down ;;
-  status|ps|st) cmd_status ;;
-  doctor|check|d) cmd_doctor "$@" ;;
-  report|r) cmd_report ;;
-  mounts|mount) cmd_mounts "$@" ;;
+  status) cmd_status ;;
+  doctor) cmd_doctor "$@" ;;
+  report) cmd_report ;;
+  mounts) cmd_mounts "$@" ;;
   projects) list_projects ;;
-  logs|l) cmd_logs "$@" ;;
+  logs) cmd_logs "$@" ;;
   setup) cmd_setup "$@" ;;
-  rebuild|update) cmd_rebuild "$@" ;;
+  rebuild) cmd_rebuild "$@" ;;
   install) cmd_install "$@" ;;
   completion) cmd_completion "$@" ;;
-  guide|tutorial) cmd_guide ;;
+  guide) cmd_guide ;;
   destroy) cmd_destroy ;;
-  help|-h|--help) usage ;;
+  tmux) cmd_tmux "$@" ;;
+  help|-h|--help) if [ "${1:-}" = --all ]; then usage_all; else usage; fi ;;
   *) usage; exit 1 ;;
 esac

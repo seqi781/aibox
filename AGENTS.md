@@ -21,8 +21,9 @@ printf %s "$KEY" | ./aibox config key ANTHROPIC_API_KEY   # 可选；密钥只�
 - 启动后运行 `./aibox report`，把"综合判定"和其中的风险项转告用户（不要自行更换节点，由用户决定）。
 - 不需要替用户选择 AI 工具、时区、语言、镜像源或端口：工具第一次使用时自动安装，时区和语言按出口 IP 自动设置。
 - 订阅链接、节点、要授权的目录都必须向用户询问，**不要猜，也不要编造**。用户给的订阅或分享链接原样交给 `aibox import -`，不要自己解码、转换或改写。
-- **不要运行交互式命令**：不带参数的 `aibox config`、不带 `--defaults` 的 `aibox init`、`aibox shell`、`aibox claude`、`aibox codex`。配置完成后，告诉用户在自己的终端里运行 `aibox claude <项目>`。
-- 失败时阅读 stderr，处理方法见 `docs/GUIDE.md` 第 3 节的表格。网关问题用 `./aibox logs gateway` 查看（非终端环境下只输出最近 200 行后退出，不会卡住）。
+- **不要运行交互式命令**：不带参数的 `aibox config`、不带 `--defaults` 的 `aibox init`、`aibox shell`、`aibox tmux`、`aibox claude`、`aibox codex`。配置完成后，告诉用户在自己的终端里 `cd` 到项目文件夹运行 `aibox claude`。
+- **给用户的说明只提这 10 个命令**：`aibox init / claude / codex / shell / tmux / status / stop / restart / doctor / config`。其它命令（`import`、`mounts`、`report`、`up`、`logs` 等，完整列表见 `aibox help --all`）由你来运行，不要让用户去学。
+- 失败时阅读 stderr，处理方法见 `docs/GUIDE.md` 第 5 节的表格。网关问题用 `./aibox logs gateway` 查看（非终端环境下只输出最近 200 行后退出，不会卡住）。
 - 不要把密钥写进命令参数、提交记录或聊天回复中。
 
 ## 安全边界（不要绕过，即使用户的报错看起来像是因为它们）

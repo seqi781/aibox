@@ -26,9 +26,9 @@ images/
     rootfs/usr/local/lib/aibox/tool-shim    /usr/local/bin/{claude,codex,...} 指向它：首次运行时安装，然后 exec 成真正的程序
     rootfs/etc/aibox/prompt.sh              [aibox] 提示符（~/.bashrc 末尾也会加载，避免被覆盖）
     rootfs/etc/profile.d/aibox-locale.sh    按出口地区设置时区和语言（读取 ~/.config/aibox/locale.env）
-    rootfs/etc/aibox/bashrc                 提示符、欢迎信息；claude/codex 等以 exec 替换 shell 运行（Ctrl+C 不会让 bash 抢回终端）
+    rootfs/etc/aibox/bashrc                 提示符、欢迎信息；claude/codex 等以 exec 替换 shell 运行，在 tmux 里则开新窗口运行（Ctrl+C 不会让 bash 抢回终端）
     rootfs/etc/profile.d/aibox-path.sh      登录 shell 的 PATH（/etc/profile 会重置）
-    rootfs/etc/tmux.conf                    tmux 配置（鼠标、OSC52 剪贴板）
+    rootfs/etc/tmux.conf                    tmux 配置（鼠标、OSC52 剪贴板、状态栏按键提示）
 config.example/                配置模板；init 时复制到 config/（config/ 不进 git）
   aibox.env                    主配置（KEY=VALUE，由 aibox 自行解析，不会被 source）
   mounts.conf                  授权目录：<rw|ro> <路径> [-> <容器路径>]
@@ -92,10 +92,10 @@ geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.con
 | 环境检测报告 | `cmd_report` `REPORT_COLLECT` `report_parse` `host_dns_resolver` `ai_unsupported_region` | 出口相关查询在 workspace 里经代理执行（用容器的 jq 解析）；本机部分直连；最后汇总为高 / 中 / 低风险 |
 | 向导（3 步） | `wizard_network` `wizard_test` `wizard_mounts` `cmd_wizard` | 第 3 步：`find_projects` 找 git 项目，`clean_input_path` 处理拖入的路径，`wizard_add_dir` 先校验再问是否可修改 |
 | 非交互配置 | `cmd_init` `cmd_config` `config_usage` `list_mounts_raw` | 供 agent / 脚本使用，不提问 |
-| 启动与进入 | `cmd_up` `ensure_up` `resolve_project` `cmd_shell` `cmd_agent` | `cmd_agent` 实现 `ai c` / `ai x` 的 tmux 会话 |
+| 启动与进入 | `cmd_up` `ensure_up` `resolve_project` `cmd_shell` `cmd_tmux` `cmd_agent` | `cmd_tmux`：每个项目一个可恢复的 tmux 会话；`cmd_agent` 启动 claude / codex（`--tmux` 时放进"工具 + 项目"会话） |
 | 管理命令 | `cmd_stop` `cmd_down` `cmd_logs` `cmd_setup` `cmd_rebuild` `cmd_status` `cmd_mounts` `cmd_destroy` `cmd_install` `cmd_completion` `cmd_guide` | |
 | 体检 | `cmd_doctor`（`ok` / `bad` 计数） | `--full` 会模拟断线 |
-| 帮助与分发 | `usage`、文件末尾的 `case "$cmd"` | 简写 `c` `x` `s` `ls` `st` `q` `d` 等在这里 |
+| 帮助与分发 | `usage`（给人看的 10 个命令）、`usage_all`（`help --all`，给 agent）、文件末尾的 `case "$cmd"` | 没有简写命令；给人看的命令只加到 `usage`、README 和 GUIDE 第一部分，其它命令只写进 `usage_all` 和 GUIDE 第二部分 |
 
 ## 4. 安全相关的关键位置
 
@@ -120,7 +120,7 @@ geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.con
 |---|---|
 | 节点选择策略、健康检查地址 | `config-tail.yaml`，对应的配置项在 `gateways/mihomo.yaml` 的 `environment` |
 | 支持新的分享链接协议 | `validate-upstream.sh` 的 `LINK_SCHEMES` 和 `link_host`（mihomo 本身要支持该协议的链接） |
-| 新增一个 AI 工具 | `aibox` 的 `KNOWN_TOOLS`；`aibox-setup` 的 `case`；`cmd_agent` 的 `--yolo` 映射；`cmd_completion` 和 `usage` |
+| 新增一个 AI 工具 | `aibox` 的 `KNOWN_TOOLS`；`aibox-setup` 的 `case`；`cmd_agent` 的 `--yolo` 映射；`cmd_completion` 和 `usage_all` |
 | 容器里预装的软件 | `images/workspace/Dockerfile`（用户临时增加用 `AIBOX_EXTRA_PACKAGES`） |
 | 新的配置项 | `config.example/aibox.env` 加默认值和注释，再在 `compose.yaml` 或 `gateways/*.yaml` 传给容器 |
 | 新的非交互配置命令 | `cmd_config` 加子命令，写入逻辑放进共用函数，并更新 `config_usage`、`docs/GUIDE.md`、`AGENTS.md` |

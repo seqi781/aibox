@@ -14,19 +14,28 @@ alias ll='ls -alF --color=auto' la='ls -A --color=auto' ls='ls --color=auto' gre
 # 提示符在 prompt.sh 里设置；~/.bashrc 的最后一行会再加载一次它，避免被 Debian 默认的 PS1 覆盖
 . /etc/aibox/prompt.sh
 
-# AI 工具直接替换当前 shell 运行（exec），退出后回到你的系统终端。
-# 这样工具运行期间后面没有任何 bash 在等待，Ctrl+C 只会交给工具本身，
-# 不可能出现"工具还在画界面，bash 却打印出提示符"的情况。
-# 想留在容器 shell 里运行：command claude
-for _t in claude codex gemini opencode; do
-  eval "$_t() { echo -e '\e[2m[aibox] 启动 $_t，退出后回到系统终端（再次进入: ai）\e[0m' >&2; exec $_t \"\$@\"; }"
-done
-unset _t
+# AI 工具运行时，它前面不能有交互式 bash 在等待：否则 Ctrl+C 之后 bash 可能把提示符打进工具界面。
+#   - 普通终端：工具直接替换当前 shell（exec），退出后回到你的系统终端
+#   - tmux 会话里：工具在新的 tmux 窗口里单独运行，退出后窗口关闭，回到原来的 shell 窗口
+# 想在当前 shell 里直接运行：command claude
+_aibox_run() {
+  local t="$1"; shift
+  if [ -n "${TMUX:-}" ]; then
+    tmux new-window -n "$t" -c "$PWD" bash -lc 'exec "$@"' _ "$t" "$@"
+  else
+    echo -e "\e[2m[aibox] 启动 ${t}，退出后回到系统终端（再次进入: aibox shell）\e[0m" >&2
+    exec "$t" "$@"
+  fi
+}
+claude()   { _aibox_run claude "$@"; }
+codex()    { _aibox_run codex "$@"; }
+gemini()   { _aibox_run gemini "$@"; }
+opencode() { _aibox_run opencode "$@"; }
 
 # 新开的终端窗口显示欢迎信息（子 shell 不重复）
 if [ -z "${AIBOX_WELCOMED:-}" ]; then
   export AIBOX_WELCOMED=1
-  echo -e "\e[35m[aibox]\e[0m 你在 aibox 容器里（网关 ${AIBOX_GATEWAY:-?}，所有流量经代理）。输入 claude / codex 启动（第一次自动安装，退出后回到系统终端），exit 退出"
+  echo -e "\e[35m[aibox]\e[0m 你在 aibox 容器里（网关 ${AIBOX_GATEWAY:-?}，所有流量经代理）。输入 claude / codex 启动（第一次运行时自动安装），exit 退出"
   if [ -n "${AIBOX_MOUNTS:-}" ]; then
     echo "$AIBOX_MOUNTS" | tr ';' '\n' | sed '/^$/d; s/^/  挂载 /'
   else
