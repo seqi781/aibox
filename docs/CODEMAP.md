@@ -26,7 +26,7 @@ images/
     rootfs/usr/local/lib/aibox/tool-shim    /usr/local/bin/{claude,codex,...} 指向它：首次运行时安装，然后 exec 成真正的程序
     rootfs/etc/aibox/prompt.sh              [aibox] 提示符（~/.bashrc 末尾也会加载，避免被覆盖）
     rootfs/etc/profile.d/aibox-locale.sh    按出口地区设置时区和语言（读取 ~/.config/aibox/locale.env）
-    rootfs/etc/aibox/bashrc                 提示符、欢迎信息
+    rootfs/etc/aibox/bashrc                 提示符、欢迎信息；claude/codex 等以 exec 替换 shell 运行（Ctrl+C 不会让 bash 抢回终端）
     rootfs/etc/profile.d/aibox-path.sh      登录 shell 的 PATH（/etc/profile 会重置）
     rootfs/etc/tmux.conf                    tmux 配置（鼠标、OSC52 剪贴板）
 config.example/                配置模板；init 时复制到 config/（config/ 不进 git）
@@ -126,7 +126,7 @@ geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.con
 | 新的非交互配置命令 | `cmd_config` 加子命令，写入逻辑放进共用函数，并更新 `config_usage`、`docs/GUIDE.md`、`AGENTS.md` |
 | 新的体检项 | `cmd_doctor`，用 `ok` / `bad` 记录 |
 | 新的报错及处理方法 | 报错文字写在代码里，处理方法写进 `docs/GUIDE.md` 第 3 节的表格 |
-| shell 提示符、欢迎信息 | `images/workspace/rootfs/etc/aibox/bashrc` |
+| shell 提示符、欢迎信息、AI 工具以 exec 运行 | `images/workspace/rootfs/etc/aibox/bashrc` |
 
 ## 6. 约束与自查
 

@@ -94,6 +94,7 @@ aibox config mounts      # 只改授权目录
 
 用法规则：
 - **就用你的系统终端**：aibox 不提供自己的终端窗口。`ai` / `ai claude` 把你当前的终端直接接进容器，滚动、复制粘贴、快捷键都和平常一样。
+- **AI 工具独占终端**：在 `ai` 进入的容器终端里输入 `claude` / `codex`，工具会直接替换这个 shell 运行，退出后回到你的系统终端（再次进入用 `ai`）。工具运行时后面没有 bash 在等待，所以 Ctrl+C 只会交给工具本身，不会出现提示符和工具界面混在一起。也可以直接在系统终端里运行 `ai claude`，效果相同。确实想留在容器 shell 里时用 `command claude`。
 - **按当前目录定位**：在 Mac 上 `cd` 到某个授权目录（或它的子目录）再运行，就进入容器里对应的位置，例如 `~/code/myapp/src` → `/workspace/myapp/src`。不在授权目录里时，可以写项目名（`ai claude myapp`），否则进入 `/workspace`。
 - **`--tmux`（可选）**：需要关掉终端后任务继续运行时使用。每个"工具 + 项目"一个会话（如 `claude-myapp`），再次运行同一命令回到原会话；`--new` 再开一个；`Ctrl+b d` 离开。
 - `--yolo`：跳过工具自身的逐条确认（Claude 的 `--dangerously-skip-permissions`，Codex 的 `--dangerously-bypass-approvals-and-sandbox`）。容器本身就是沙箱，agent 只能改动你授权为 rw 的目录。
