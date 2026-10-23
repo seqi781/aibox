@@ -29,6 +29,9 @@ if hits="$(grep -nE '\$\([^)]*\[ -t [012] \]' aibox)"; then bad "在 \$(...) 里
 # GNU 专有的命令行选项（macOS 的 BSD 工具不支持）
 if hits="$(grep -nE '(^|[[:space:];&|(])(sed -i|readlink -f|stat -c|date -d|grep -P|base64 -w|xargs -r|sort -V|head -n -|timeout [0-9])' aibox | grep -vE '^[0-9]+:[[:space:]]*#')"; then bad "使用了 GNU 专有选项:"; echo "$hits" | sed 's/^/      /'; else ok "没有 GNU 专有选项"; fi
 
+# report 会运行 doctor，doctor 末尾又会运行 report：必须带 AIBOX_IN_REPORT，否则两者无限互相调用（卡在"等待网络隔离体检"）
+if grep -q '( AIBOX_IN_REPORT=1; cmd_doctor )' aibox && grep -q 'AIBOX_IN_REPORT:-' aibox; then ok "report 与 doctor 不会互相无限调用"; else bad "cmd_report 调用 cmd_doctor 时缺少 AIBOX_IN_REPORT 保护"; fi
+
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck -S error aibox $POSIX_SH && ok "shellcheck（error 级别）" || bad "shellcheck 报错"
 else

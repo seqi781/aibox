@@ -1781,7 +1781,8 @@ EOF
   echo
   if [ "$FAIL" -eq 0 ]; then echo "${G}${B}全部通过${N} ($PASS 项)"; else echo "${R}${B}$FAIL 项失败${N}, $PASS 项通过"; fi
   # 再附上环境检测报告（出口 IP 类型与风险、DNS、时区一致性、综合判定）
-  if [ "${AIBOX_DOCTOR_NO_REPORT:-}" != 1 ]; then echo; ( cmd_report ) || true; fi
+  # 报告自己也会运行体检：在报告里运行时（AIBOX_IN_REPORT）不能再附带报告，否则两者无限互相调用
+  if [ "${AIBOX_DOCTOR_NO_REPORT:-}" != 1 ] && [ -z "${AIBOX_IN_REPORT:-}" ]; then echo; ( cmd_report ) || true; fi
   [ "$FAIL" -eq 0 ] || exit 1
 }
 
@@ -1886,7 +1887,7 @@ cmd_report() {
   mkdir -p "$LOG_DIR"
   report_host_collect > "$hf" 2>/dev/null &
   local hp=$!
-  ( cmd_doctor ) > "$df" 2>&1 &
+  ( AIBOX_IN_REPORT=1; cmd_doctor ) > "$df" 2>&1 &
   local dp=$!
   run_step "检测本机与出口 IP、IP 风险、DNS" "约 15 秒" "$xf" docker exec "$WS" bash -c "$REPORT_COLLECT" || true
   wait "$hp" || true
