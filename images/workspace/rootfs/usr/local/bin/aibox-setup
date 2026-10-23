@@ -1,12 +1,19 @@
 #!/bin/bash
-# 安装/升级 AI 编程工具到持久化 home（流量经网关隧道）
-#   aibox-setup            安装缺失的工具
-#   aibox-setup --upgrade  强制升级到最新
+# 安装 / 升级 AI 编程工具到持久化 home（流量经网关隧道）
+#   aibox-setup claude codex       安装指定工具（已安装的跳过）
+#   aibox-setup --upgrade          升级所有已安装的工具
+#   aibox-setup --upgrade claude   升级指定工具
+# 通常不需要手动运行：第一次执行 aibox claude / codex，或在容器里输入 claude / codex 时会自动安装
 set -uo pipefail
-UPGRADE=0; [ "${1:-}" = "--upgrade" ] && UPGRADE=1
-TOOLS="${AIBOX_TOOLS:-claude codex}"
+ALL="claude codex gemini opencode"
+UPGRADE=0; TOOLS=""
+for a in "$@"; do case "$a" in --upgrade) UPGRADE=1 ;; *) TOOLS="$TOOLS $a" ;; esac; done
+if [ -z "$TOOLS" ]; then
+  [ "$UPGRADE" = 1 ] || { echo "用法: aibox-setup <$(echo $ALL | tr ' ' '|')>... [--upgrade]"; exit 1; }
+  for t in $ALL; do command -v "$t" >/dev/null 2>&1 && TOOLS="$TOOLS $t"; done
+  [ -n "$TOOLS" ] || { echo "还没有安装任何 AI 工具"; exit 0; }
+fi
 rc=0
-
 need() { [ "$UPGRADE" = 1 ] || ! command -v "$1" >/dev/null 2>&1; }
 
 for t in $TOOLS; do
@@ -15,24 +22,18 @@ for t in $TOOLS; do
       if need claude; then
         echo "==> 安装 Claude Code"
         if ! curl -fsSL https://claude.ai/install.sh | bash; then
-          echo "    原生安装失败，回退到 npm"
+          echo "    原生安装失败，改用 npm"
           npm install -g @anthropic-ai/claude-code || rc=1
         fi
       fi ;;
-    codex)
-      need codex && { echo "==> 安装 Codex CLI"; npm install -g @openai/codex || rc=1; } ;;
-    gemini)
-      need gemini && { echo "==> 安装 Gemini CLI"; npm install -g @google/gemini-cli || rc=1; } ;;
-    opencode)
-      need opencode && { echo "==> 安装 opencode"; npm install -g opencode-ai || rc=1; } ;;
-    *) echo "未知工具: ${t}（支持 claude codex gemini opencode）"; rc=1 ;;
+    codex)    need codex    && { echo "==> 安装 Codex CLI";  npm install -g @openai/codex || rc=1; } ;;
+    gemini)   need gemini   && { echo "==> 安装 Gemini CLI"; npm install -g @google/gemini-cli || rc=1; } ;;
+    opencode) need opencode && { echo "==> 安装 opencode";   npm install -g opencode-ai || rc=1; } ;;
+    *) echo "未知工具: ${t}（支持: ${ALL}）"; rc=1 ;;
   esac
 done
-
 hash -r
 for t in $TOOLS; do
-  bin="$t"
-  command -v "$bin" >/dev/null 2>&1 && printf '  %-9s %s\n' "$t" "$("$bin" --version 2>/dev/null | head -1)"
+  command -v "$t" >/dev/null 2>&1 && printf '  %-9s %s\n' "$t" "$("$t" --version 2>/dev/null | head -1)"
 done
-[ "$rc" = 0 ] && mkdir -p "$HOME/.cache" && touch "$HOME/.cache/aibox-setup.done"
 exit "$rc"

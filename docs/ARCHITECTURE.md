@@ -106,6 +106,8 @@ gluetun 自带 kill switch（iptables 只放行到 VPN 服务器的连接）、D
 - 授权目录 → `/workspace/<名称>`，也可以用 `-> /path` 指定容器内路径。
 - 构建镜像时让容器内 `dev` 用户的 UID/GID 与宿主机一致，新建文件的归属就是正确的（macOS 通常是 501:20）。
 - `/home/dev` 是命名卷：AI 工具本体、登录凭据、shell 历史、npm 全局包都在里面，`down` 或 `rebuild` 后都还在。
+- AI 工具不打进镜像，也不预装：第一次使用时经网关安装到 home 卷。
+- 时区和语言跟随出口 IP 的地区：`aibox up` 在 workspace 里经隧道查询 ipinfo.io（备用 ip-api.com），生成对应 locale，写入 `~/.config/aibox/locale.env`，由登录 shell 和 `aibox` 的 `docker exec -e` 生效。不写进容器环境变量，地区变化时不需要重建容器（不会中断 tmux 会话）。
 - apt 安装的包写进 `AIBOX_EXTRA_PACKAGES`，执行 `rebuild` 后会固化到镜像里。
 
 ## 6. 跨平台
@@ -121,7 +123,7 @@ gluetun 自带 kill switch（iptables 只放行到 VPN 服务器的连接）、D
 | 使用者 | 方式 | 特点 |
 |---|---|---|
 | 人 | `aibox init` / `aibox config`（交互式向导） | 逐步提问，支持 Tab 补全路径，密钥输入不显示 |
-| AI agent / 脚本 | `aibox config proxy/vpn/tools/ports/key/set/check`、`aibox mounts add/rm` | 不提问；返回码区分成败；失败时不改动原配置；密钥只从标准输入或环境变量读取 |
+| AI agent / 脚本 | `aibox import`、`aibox test`、`aibox config proxy/vpn/key/set/check`、`aibox mounts add/rm` | 不提问；返回码区分成败；失败时不改动原配置；密钥只从标准输入或环境变量读取 |
 
 向导和非交互命令共用同一套写入和校验函数（`write_sub_upstream`、`install_wireguard`、`mounts_add`、`validate-upstream.sh` 等），两种方式的结果完全一致。`AGENTS.md` / `CLAUDE.md` 会被 Codex / Claude Code 自动读取，其中写明了 agent 的操作流程和安全边界。
 

@@ -19,7 +19,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      TZ: ${AIBOX_TZ:-UTC}
       NODE_FILTER: ${AIBOX_NODE_FILTER:-}
       GROUP_TYPE: ${AIBOX_GROUP_TYPE:-fallback}
       PROXY_DNS: ${AIBOX_PROXY_DNS:-}

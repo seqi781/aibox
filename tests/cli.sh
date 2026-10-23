@@ -94,8 +94,11 @@ run 0 ./aibox projects
 expect "projects 输出两个项目" [ "$(./aibox projects | wc -l | tr -d ' ')" = 2 ]
 
 # ---------- 工具 / 端口 / 密钥 / 其它键 ----------
-run 0 ./aibox config tools claude codex gemini
-run 1 ./aibox config tools claude bogus
+run 1 ./aibox config tools claude
+run 0 ./aibox import "$VL" --no-test
+run 1 ./aibox test
+run 0 ./aibox config set AIBOX_TZ Asia/Tokyo
+run 0 ./aibox config set AIBOX_LANG ja_JP.UTF-8
 run 0 ./aibox config ports 3000,8080:80
 run 1 ./aibox config ports abc
 run 0 ./aibox config ports ''
@@ -139,7 +142,6 @@ run 0 zsh -f -c 'eval "$(./aibox completion zsh)" && whence -w _aibox'
 run 1 ./aibox config
 run 1 ./aibox config network
 run 1 ./aibox config mounts
-run 1 ./aibox config tools
 
 # ---------- install（非终端：不提问） ----------
 run 0 env PATH="$HOME/.local/bin:/usr/bin:/bin" ./aibox install

@@ -103,7 +103,7 @@ print(f'交互式流程（bash {BASH_V}）')
 VL = 'vless://uuid@5.6.7.8:443?type=tcp#日本01'
 TJ = 'trojan://pw@tj.example.com:443?sni=tj.example.com#美国01'
 
-drive('init：粘贴无法识别的内容 → 重新粘贴两条分享链接 → 目录 → 工具 → 密钥 → 其它', ['init'], [
+drive('init：粘贴无法识别的内容 → 重新粘贴两条分享链接 → 筛选 → 授权目录', ['init'], [
     (r'请选择 \[1\]: ', '1'),
     (r'最后再按一次回车结束：', 'hello-world\n'),
     (r'重新输入？.*\[Y/n\]: ', ''),
@@ -113,23 +113,16 @@ drive('init：粘贴无法识别的内容 → 重新粘贴两条分享链接 →
     (r'添加目录.*: ', W + '/home/docs'), (r'权限 rw/ro .*: ', 'ro'),
     (r'添加目录.*: ', '~'), (r'权限 rw/ro .*: ', 'rw'),
     (r'添加目录.*: ', ''),
-    (r'要安装的 AI 工具.*: ', 'claude bogus'), (r'要安装的 AI 工具.*: ', 'claude codex'),
-    (r'映射端口.*: ', '3000,5173'),
-    (r'现在配置 API Key？ \[y/N\]: ', 'y'),
-    (r'ANTHROPIC_API_KEY.*: ', 'sk-ant-xxx'), (r'OPENAI_API_KEY.*: ', ''),
-    (r'时区.*: ', 'Asia/Shanghai'),
-    (r'使用清华镜像源加速构建？ \[Y/n\]: ', ''),
     (r'安装 aibox 命令.*\[Y/n\]: ', 'n'),
 ])
 check('init 写入 2 条分享链接', conf('mihomo/links.txt').count('://') == 2)
 check('init 写入节点筛选', 'AIBOX_NODE_FILTER=日本|美国' in conf('aibox.env'))
 check('init 授权两个目录（~ 被拒绝）', conf('mounts.conf').count('\nrw') + conf('mounts.conf').count('\nro') == 2)
-check('init 保存 API Key', 'ANTHROPIC_API_KEY=sk-ant-xxx' in conf('workspace.env'))
+check('init 不再询问工具、端口、时区、镜像源', 'AIBOX_TOOLS' not in conf('aibox.env') and 'AIBOX_APT_MIRROR' not in conf('aibox.env'))
 
 drive('config：全部回车使用默认值', ['config'], [
     (r'请选择 \[5\]: ', ''), (r'保留以上授权？ \[Y/n\]: ', ''), (r'添加目录.*: ', ''),
-    (r'要安装的 AI 工具.*: ', ''), (r'映射端口.*: ', ''), (r'现在配置 API Key？ \[y/N\]: ', ''),
-    (r'时区.*: ', ''), (r'使用清华镜像源加速构建？ \[Y/n\]: ', 'n'), (r'安装 aibox 命令.*: ', 'n'),
+    (r'安装 aibox 命令.*: ', 'n'),
 ])
 check('默认值不改变分享链接', conf('mihomo/links.txt').count('://') == 2)
 
@@ -159,9 +152,6 @@ check('OpenVPN 写入 gluetun.env', 'OPENVPN_USER=user' in conf('gluetun.env'))
 
 drive('config mounts：清空后重新添加', ['config', 'mounts'], [
     (r'保留以上授权？ \[Y/n\]: ', 'n'), (r'添加目录.*: ', '~/code/app'), (r'权限 rw/ro .*: ', 'ro'), (r'添加目录.*: ', ''),
-])
-drive('config tools', ['config', 'tools'], [
-    (r'要安装的 AI 工具.*: ', 'codex'), (r'映射端口.*: ', ''), (r'现在配置 API Key？ \[y/N\]: ', 'n'),
 ])
 drive('config key：终端里隐藏输入', ['config', 'key', 'OPENAI_API_KEY'], [(r'OPENAI_API_KEY（输入不显示）: ', 'sk-openai')])
 check('隐藏输入的密钥已保存', 'OPENAI_API_KEY=sk-openai' in conf('workspace.env'))

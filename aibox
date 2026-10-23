@@ -401,7 +401,7 @@ choose() {  # choose 变量名 默认序号 选项...
     echo "  请输入 1-$#"
   done
 }
-step() { echo; echo "${C}${B}[$1/5] $2${N}"; }
+step() { echo; echo "${C}${B}[$1/3] $2${N}"; }
 
 upstream_header() {
   cat <<'EOF'
@@ -610,8 +610,174 @@ check_wg_endpoint() {
   sh "$VALIDATOR" --server "$host"
 }
 
-check_tools() { local t; for t in "$@"; do case " $KNOWN_TOOLS " in *" $t "*) ;; *) echo "未知工具: ${t}（可选: ${KNOWN_TOOLS}）" >&2; return 1 ;; esac; done; }
 check_ports() { case "$1" in *[!0-9,:]*) echo "端口格式错误: $1（应为 3000,5173 或 8080:80）" >&2; return 1 ;; esac; }
+
+# ================= 出口测试与地区设置 =================
+GEO_FILE="$ROOT/.aibox/geo.env"     # 最近一次检测到的出口地区（缓存）
+GW_TEST=aibox-gwtest
+
+jf() { printf '%s' "$2" | tr -d '\n' | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p"; }   # 取 JSON 字符串字段
+
+# 国家代码 → 系统语言（没有列出的用 en_US）
+country_locale() {
+  case "$1" in
+    CN) echo zh_CN.UTF-8 ;; TW) echo zh_TW.UTF-8 ;; HK|MO) echo zh_HK.UTF-8 ;; SG) echo en_SG.UTF-8 ;;
+    JP) echo ja_JP.UTF-8 ;; KR) echo ko_KR.UTF-8 ;; TH) echo th_TH.UTF-8 ;; VN) echo vi_VN.UTF-8 ;;
+    MY) echo ms_MY.UTF-8 ;; ID) echo id_ID.UTF-8 ;; PH) echo en_PH.UTF-8 ;; IN) echo en_IN.UTF-8 ;;
+    GB) echo en_GB.UTF-8 ;; IE) echo en_IE.UTF-8 ;; CA) echo en_CA.UTF-8 ;; AU) echo en_AU.UTF-8 ;;
+    NZ) echo en_NZ.UTF-8 ;; ZA) echo en_ZA.UTF-8 ;; DE) echo de_DE.UTF-8 ;; AT) echo de_AT.UTF-8 ;;
+    CH) echo de_CH.UTF-8 ;; FR) echo fr_FR.UTF-8 ;; BE) echo nl_BE.UTF-8 ;; NL) echo nl_NL.UTF-8 ;;
+    LU) echo fr_LU.UTF-8 ;; ES) echo es_ES.UTF-8 ;; PT) echo pt_PT.UTF-8 ;; IT) echo it_IT.UTF-8 ;;
+    SE) echo sv_SE.UTF-8 ;; NO) echo nb_NO.UTF-8 ;; DK) echo da_DK.UTF-8 ;; FI) echo fi_FI.UTF-8 ;;
+    PL) echo pl_PL.UTF-8 ;; CZ) echo cs_CZ.UTF-8 ;; HU) echo hu_HU.UTF-8 ;; RO) echo ro_RO.UTF-8 ;;
+    GR) echo el_GR.UTF-8 ;; TR) echo tr_TR.UTF-8 ;; RU) echo ru_RU.UTF-8 ;; UA) echo uk_UA.UTF-8 ;;
+    IL) echo he_IL.UTF-8 ;; AE) echo ar_AE.UTF-8 ;; SA) echo ar_SA.UTF-8 ;; BR) echo pt_BR.UTF-8 ;;
+    MX) echo es_MX.UTF-8 ;; AR) echo es_AR.UTF-8 ;; CL) echo es_CL.UTF-8 ;; CO) echo es_CO.UTF-8 ;;
+    *) echo en_US.UTF-8 ;;
+  esac
+}
+
+# 在指定容器里经隧道查询出口 IP 的地区 → GEO_IP GEO_CC GEO_CITY GEO_ORG GEO_TZ
+geo_query() {
+  local c="$1" j
+  GEO_IP=""; GEO_CC=""; GEO_CITY=""; GEO_ORG=""; GEO_TZ=""
+  j="$(docker exec "$c" curl -fsS --max-time 10 https://ipinfo.io/json 2>/dev/null || true)"
+  if printf '%s' "$j" | grep -q '"timezone"'; then
+    GEO_IP="$(jf ip "$j")"; GEO_CC="$(jf country "$j")"; GEO_CITY="$(jf city "$j")"; GEO_ORG="$(jf org "$j")"; GEO_TZ="$(jf timezone "$j")"
+  else
+    j="$(docker exec "$c" curl -fsS --max-time 10 'http://ip-api.com/json?fields=query,countryCode,city,timezone,isp' 2>/dev/null || true)"
+    GEO_IP="$(jf query "$j")"; GEO_CC="$(jf countryCode "$j")"; GEO_CITY="$(jf city "$j")"; GEO_ORG="$(jf isp "$j")"; GEO_TZ="$(jf timezone "$j")"
+  fi
+  [ -n "$GEO_TZ" ] && [ -n "$GEO_CC" ]
+}
+geo_save() {
+  mkdir -p "$(dirname "$GEO_FILE")"
+  printf 'GEO_IP=%s\nGEO_CC=%s\nGEO_CITY=%s\nGEO_ORG=%s\nGEO_TZ=%s\n' "$GEO_IP" "$GEO_CC" "$GEO_CITY" "$GEO_ORG" "$GEO_TZ" > "$GEO_FILE"
+  fix_owner "$ROOT/.aibox"
+}
+geo_load() {
+  [ -f "$GEO_FILE" ] || return 1
+  GEO_IP="$(get_kv "$GEO_FILE" GEO_IP)"; GEO_CC="$(get_kv "$GEO_FILE" GEO_CC)"; GEO_CITY="$(get_kv "$GEO_FILE" GEO_CITY)"
+  GEO_ORG="$(get_kv "$GEO_FILE" GEO_ORG)"; GEO_TZ="$(get_kv "$GEO_FILE" GEO_TZ)"
+  [ -n "$GEO_TZ" ]
+}
+# 最终使用的时区 / 语言：aibox.env 中手动指定的优先，否则按出口地区
+geo_tz()   { printf '%s' "${AIBOX_TZ:-${GEO_TZ:-UTC}}"; }
+geo_lang() { if [ -n "${AIBOX_LANG:-}" ]; then printf '%s' "$AIBOX_LANG"; elif [ -n "${GEO_CC:-}" ]; then country_locale "$GEO_CC"; else printf 'C.UTF-8'; fi; }
+geo_where() { printf '%s' "${GEO_CC:-?}${GEO_CITY:+ $GEO_CITY}"; }
+
+# 进入容器时带上时区和语言（docker exec 不经过登录 shell 时也生效）
+GEO_ARGS=()
+geo_args() {
+  GEO_ARGS=()
+  geo_load >/dev/null 2>&1 || [ -n "${AIBOX_TZ:-}${AIBOX_LANG:-}" ] || return 0
+  local l; l="$(geo_lang)"
+  GEO_ARGS=(-e "TZ=$(geo_tz)")
+  if docker exec "$WS" sh -c 'locale -a 2>/dev/null | grep -qix "$1"' _ "${l%%.*}.utf8" 2>/dev/null; then
+    GEO_ARGS+=(-e "LANG=$l" -e "LC_ALL=$l")
+  fi
+}
+
+# aibox up 后：检测出口地区，设置 workspace 的时区和语言
+geo_apply() {
+  local tz lang
+  if geo_query "$WS"; then geo_save
+  elif geo_load; then warn "暂时查不到出口 IP 的地区，沿用上次的结果（$(geo_where)）"
+  else warn "查不到出口 IP 的地区，时区和语言保持 UTC / C.UTF-8"; fi
+  tz="$(geo_tz)"; lang="$(geo_lang)"
+  if [ "$lang" != C.UTF-8 ] && ! docker exec -u root "$WS" sh -c \
+      'locale -a 2>/dev/null | grep -qix "${1%%.*}.utf8" || localedef -i "${1%%.*}" -f UTF-8 "$1" 2>/dev/null' _ "$lang"; then
+    warn "无法生成语言 ${lang}，改用 C.UTF-8"; lang=C.UTF-8
+  fi
+  docker exec "$WS" sh -c 'mkdir -p ~/.config/aibox && printf "TZ=%s\nLANG=%s\n" "$1" "$2" > ~/.config/aibox/locale.env' _ "$tz" "$lang"
+  info "出口 ${GEO_IP:-未知}（$(geo_where)）→ 时区 ${tz}，语言 ${lang}"
+}
+
+# 用临时网关容器测试当前代理配置：可用节点、延迟、出口 IP 与地区。
+# 不影响正在运行的 aibox（独立容器，测完即删）。至少一个节点可用时返回 0
+proxy_test() {
+  local i=0 all delays alive=0 total=0 item rest name ms list="" dead="" deadn=0 now
+  if docker image inspect aibox/gateway-mihomo:latest >/dev/null 2>&1; then echo "  正在测试节点…"
+  else echo "  正在测试节点…（第一次需要构建网关镜像，约 1 分钟）"; fi
+  docker build -q -t aibox/gateway-mihomo:latest --build-arg MIHOMO_VERSION="${AIBOX_MIHOMO_VERSION:-v1.19.33}" \
+    "$ROOT/images/mihomo-gateway" >/dev/null || { echo "  网关镜像构建失败" >&2; return 1; }
+  docker rm -f "$GW_TEST" >/dev/null 2>&1 || true
+  local vol="$CONF/mihomo:/config:ro"; [ "${AIBOX_SELINUX_RELABEL:-}" = 1 ] && vol="$vol,z"
+  docker run -d --name "$GW_TEST" --cap-add NET_ADMIN --device /dev/net/tun \
+    --sysctl net.ipv6.conf.all.disable_ipv6=1 --sysctl net.ipv6.conf.default.disable_ipv6=1 \
+    --sysctl net.ipv4.conf.all.src_valid_mark=1 --add-host host.docker.internal:host-gateway \
+    -e NODE_FILTER="${AIBOX_NODE_FILTER:-}" -e GROUP_TYPE="${AIBOX_GROUP_TYPE:-fallback}" \
+    -e PROXY_DNS="${AIBOX_PROXY_DNS:-}" -e PROXY_SERVER_DNS="${AIBOX_PROXY_SERVER_DNS:-}" \
+    -e TEST_URL="${AIBOX_TEST_URL:-https://www.gstatic.com/generate_204}" \
+    -v "$vol" aibox/gateway-mihomo:latest >/dev/null || { echo "  无法启动测试容器" >&2; return 1; }
+  # 等待 mihomo 启动并下载订阅（最多约 30 秒）
+  while :; do
+    i=$((i + 1))
+    if ! is_running "$GW_TEST"; then
+      echo "  测试网关启动失败：" >&2; docker logs --tail 8 "$GW_TEST" 2>&1 | sed 's/^/    /' >&2
+      docker rm -f "$GW_TEST" >/dev/null 2>&1; return 1
+    fi
+    all="$(docker exec "$GW_TEST" curl -fsS --max-time 3 --unix-socket /run/aibox/mihomo.sock http://mihomo/proxies/PROXY 2>/dev/null \
+      | sed -n 's/.*"all":\[\([^]]*\)\].*/\1/p' || true)"
+    case "$all" in ''|'"REJECT"') [ "$i" -lt 15 ] && { sleep 2; continue; } ;; esac
+    break
+  done
+  if [ -z "$all" ] || [ "$all" = '"REJECT"' ]; then
+    echo "  ${R}✘${N} 没有可用节点：订阅下载失败，或节点筛选没有匹配到任何节点" >&2
+    docker logs "$GW_TEST" 2>&1 | grep -iE 'error|fail' | tail -3 | sed 's/^/    /' >&2
+    docker rm -f "$GW_TEST" >/dev/null 2>&1; return 1
+  fi
+  # 所有节点测延迟（只返回可用的节点）
+  delays="$(docker exec "$GW_TEST" curl -fsS --max-time 20 --unix-socket /run/aibox/mihomo.sock \
+    "http://mihomo/group/PROXY/delay?url=$(printf '%s' "${AIBOX_TEST_URL:-https://www.gstatic.com/generate_204}" | sed 's/:/%3A/g; s#/#%2F#g')&timeout=5000" 2>/dev/null || true)"
+  rest="${delays#\{}"; rest="${rest%\}}"
+  while [ -n "$rest" ]; do
+    item="${rest%%,\"*}"; if [ "$item" = "$rest" ]; then rest=""; else rest="${rest#*,\"}"; fi
+    item="${item#\"}"; name="${item%\":*}"; ms="${item##*\":}"
+    case "$ms" in ''|*[!0-9]*) continue ;; esac
+    alive=$((alive + 1)); list="$list$ms	$name
+"
+  done
+  rest="$all"
+  while [ -n "$rest" ]; do
+    item="${rest%%\",\"*}"; if [ "$item" = "$rest" ]; then rest=""; else rest="${rest#*\",\"}"; fi
+    item="${item#\"}"; item="${item%\"}"; total=$((total + 1))
+    case "$delays" in *"\"$item\":"*) ;; *) deadn=$((deadn + 1)); [ "$deadn" -le 5 ] && dead="$dead  ${item}" ;; esac
+  done
+  if [ "$alive" = 0 ]; then
+    if [ "$total" = 1 ]; then echo "  ${R}✘${N} 节点测试：节点连不上" >&2; else echo "  ${R}✘${N} 节点测试：$total 个节点都连不上" >&2; fi
+    docker rm -f "$GW_TEST" >/dev/null 2>&1; return 1
+  fi
+  echo "  ${G}✔${N} 节点测试：${alive}/${total} 个可用"
+  printf '%s' "$list" | sort -n | head -5 | while IFS='	' read -r ms name; do printf '      %5s ms  %s\n' "$ms" "$name"; done
+  [ "$alive" -gt 5 ] && echo "      ……"
+  [ "$alive" = "$total" ] || echo "    ${D}不可用:${dead}$([ $((total - alive)) -gt 5 ] && echo ' ……')${N}"
+  now="$(docker exec "$GW_TEST" curl -fsS --max-time 3 --unix-socket /run/aibox/mihomo.sock http://mihomo/proxies/PROXY 2>/dev/null | sed -n 's/.*"now":"\([^"]*\)".*/\1/p' || true)"
+  if geo_query "$GW_TEST"; then
+    geo_save
+    echo "  ${G}✔${N} 出口 IP：${GEO_IP}（$(geo_where) · ${GEO_ORG}）  当前节点：${now:-?}"
+    echo "  ${G}✔${N} 容器的时区和语言将按出口地区设置：$(geo_tz) · $(geo_lang)"
+  else
+    echo "  ${Y}!${N} 节点可用，但查不到出口 IP 的地区（ipinfo.io / ip-api.com 都无法访问）"
+  fi
+  docker rm -f "$GW_TEST" >/dev/null 2>&1 || true
+  return 0
+}
+
+docker_ready() { find_docker 2>/dev/null && docker info >/dev/null 2>&1; }
+
+# 备份 / 恢复出口配置（测试失败时恢复）
+snap_save()    { local f; for f in "$UPSTREAM_FILE" "$LINKS_FILE" "$ENV_FILE"; do rm -f "$f.snap"; [ -f "$f" ] && cp "$f" "$f.snap"; done; true; }
+snap_restore() { local f; for f in "$UPSTREAM_FILE" "$LINKS_FILE" "$ENV_FILE"; do if [ -f "$f.snap" ]; then mv "$f.snap" "$f"; else rm -f "$f"; fi; done; }
+snap_drop()    { rm -f "$UPSTREAM_FILE.snap" "$LINKS_FILE.snap" "$ENV_FILE.snap"; }
+
+cmd_test() {
+  load_env
+  [ "$AIBOX_GATEWAY" = mihomo ] || die "当前出口是 VPN（gluetun）：启动后用 aibox doctor 检查"
+  sh "$VALIDATOR" "$UPSTREAM_FILE" || exit 1
+  need_docker
+  proxy_test || exit 1
+}
 
 wizard_network() {
   local cur def opt url n=1 more filter body line
@@ -640,26 +806,32 @@ wizard_network() {
 "; done
         [ -n "$input" ] || { echo "  没有输入任何内容"; continue; }
         echo "  正在识别…"
-        if import_proxy "$input"; then break; fi
-        yesno "重新输入？（选 n 则保持原配置不变）" y || return 0
-      done
-      show_probe_names
-      echo "  ${D}提示：可以用正则只选部分节点，例如 日本|JP 或 香港|HK；留空表示全部节点自动择优${N}"
-      ask filter "节点筛选" "$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
-      set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"
-      set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo ;;
+        snap_save
+        if import_proxy "$input"; then
+          show_probe_names
+          echo "  ${D}可以用正则只选部分节点，例如 日本|JP 或 香港|HK；直接回车表示全部节点自动择优${N}"
+          ask filter "节点筛选" "$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
+          set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"; set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo
+          wizard_test && { snap_drop; break; }
+        fi
+        if ! yesno "重新输入？（选 n 则保持原来的配置）" y; then snap_restore; return 0; fi
+        snap_restore
+      done ;;
     2)
       while :; do
         echo "  粘贴节点（Clash YAML 格式，可包含 proxies: 行），粘贴完成后输入单独一行 ${B}END${N} 回车："
         body=""
         while IFS= read -r line; do [ "$line" = END ] && break; body="$body$line
 "; done
-        if write_nodes_upstream "$body"; then break; fi
-        yesno "重新粘贴？（选 n 则保持原配置不变）" y || return 0
-      done
-      ask filter "节点筛选正则（留空=全部）" "$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
-      set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"
-      set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo ;;
+        snap_save
+        if write_nodes_upstream "$body"; then
+          ask filter "节点筛选正则（留空=全部）" "$(get_kv "$ENV_FILE" AIBOX_NODE_FILTER)"
+          set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"; set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo
+          wizard_test && { snap_drop; break; }
+        fi
+        if ! yesno "重新粘贴？（选 n 则保持原来的配置）" y; then snap_restore; return 0; fi
+        snap_restore
+      done ;;
     3)
       local wg
       while :; do
@@ -710,62 +882,24 @@ wizard_mounts() {
     case "$mode" in rw|ro) ;; *) echo "  请输入 rw 或 ro"; continue ;; esac
     mounts_add "$mode" "$p" || true
   done
-}
-
-wizard_tools() {
-  local tools t ports k
-  echo "  可选: $KNOWN_TOOLS"
-  while :; do
-    ask tools "要安装的 AI 工具（空格分隔）" "$(get_kv "$ENV_FILE" AIBOX_TOOLS)"
-    check_tools $tools && break
-  done
-  set_kv "$ENV_FILE" AIBOX_TOOLS "$tools"
-  echo "  ${D}开发服务器端口会映射到本机 127.0.0.1（服务需监听 0.0.0.0），例如 3000,5173${N}"
-  while :; do
-    ask ports "映射端口（留空=不映射）" "$(get_kv "$ENV_FILE" AIBOX_PORTS)"
-    check_ports "$ports" && break
-  done
-  set_kv "$ENV_FILE" AIBOX_PORTS "$ports"
-  echo "  ${D}使用 Claude / ChatGPT 订阅账号的，可以跳过这一步，进入容器后再登录${N}"
-  if yesno "现在配置 API Key？" n; then
-    case " $tools " in *" claude "*) ask_secret k "ANTHROPIC_API_KEY（留空跳过）"; [ -z "$k" ] || set_kv "$WS_ENV_FILE" ANTHROPIC_API_KEY "$k" ;; esac
-    case " $tools " in *" codex "*) ask_secret k "OPENAI_API_KEY（留空跳过）"; [ -z "$k" ] || set_kv "$WS_ENV_FILE" OPENAI_API_KEY "$k" ;; esac
-    case " $tools " in *" gemini "*) ask_secret k "GEMINI_API_KEY（留空跳过）"; [ -z "$k" ] || set_kv "$WS_ENV_FILE" GEMINI_API_KEY "$k" ;; esac
-    chmod 600 "$WS_ENV_FILE"
-  fi
-}
-
-host_tz() {
-  local l; l="$(readlink /etc/localtime 2>/dev/null || true)"
-  case "$l" in *zoneinfo/*) echo "${l##*zoneinfo/}"; return ;; esac
-  [ -f /etc/timezone ] && { cat /etc/timezone; return; }
-  echo UTC
-}
-
-wizard_misc() {
-  local tz mdef
-  ask tz "时区" "$(get_kv "$ENV_FILE" AIBOX_TZ | grep . || host_tz)"
-  set_kv "$ENV_FILE" AIBOX_TZ "$tz"
-  case "$tz" in Asia/Shanghai|Asia/Chongqing|Asia/Urumqi|Asia/Harbin|PRC) mdef=y ;; *) mdef=n ;; esac
-  [ -n "$(get_kv "$ENV_FILE" AIBOX_APT_MIRROR)" ] && mdef=y
-  echo "  ${D}构建镜像时下载系统软件包走本机网络（不经代理），国内建议使用镜像源${N}"
-  if yesno "使用清华镜像源加速构建？" "$mdef"; then
-    set_kv "$ENV_FILE" AIBOX_APT_MIRROR "http://mirrors.tuna.tsinghua.edu.cn"
-  else
-    set_kv "$ENV_FILE" AIBOX_APT_MIRROR ""
-  fi
   if selinux_enforcing; then
     echo "  检测到 SELinux（Enforcing）：挂载目录需要重新打标签（:z）容器才能访问"
     if yesno "允许 aibox 为授权目录设置 SELinux 共享标签？" y; then set_kv "$ENV_FILE" AIBOX_SELINUX_RELABEL 1; else set_kv "$ENV_FILE" AIBOX_SELINUX_RELABEL 0; fi
   fi
 }
 
+# 向导里测试刚配置的代理（Docker 不可用时跳过）。测试失败返回 1
+wizard_test() {
+  if [ "${WIZ_DOCKER:-0}" != 1 ]; then echo "  ${D}Docker 尚未就绪，跳过节点测试（之后运行 aibox test）${N}"; return 0; fi
+  ( load_env; proxy_test ) && return 0
+  echo "  ${Y}节点测试没有通过${N}"; return 1
+}
+
 wizard_summary() {
   local gw; gw="$(get_kv "$ENV_FILE" AIBOX_GATEWAY)"
   echo; echo "${B}配置完成${N}（保存在 config/，可随时运行 ${B}aibox config${N} 修改）"
   echo "  出口:   $([ "$gw" = gluetun ] && echo "VPN（gluetun，$(get_kv "$CONF/gluetun.env" VPN_SERVICE_PROVIDER)）" || echo "代理（mihomo）  节点筛选: $(get_kv "$ENV_FILE" AIBOX_NODE_FILTER | grep . || echo 全部)")"
-  echo "  工具:   $(get_kv "$ENV_FILE" AIBOX_TOOLS)"
-  echo "  端口:   $(get_kv "$ENV_FILE" AIBOX_PORTS | grep . || echo 无)"
+  geo_load 2>/dev/null && echo "  地区:   $(geo_where) → 时区 $(geo_tz)，语言 $(geo_lang)（按出口 IP 自动设置）"
   echo "  项目:   $(list_projects | paste -sd' ' - | grep . || echo "（未授权任何目录）")"
 }
 
@@ -777,7 +911,9 @@ cmd_wizard() {
   step 1 "环境检查"
   case "$HOST_OS" in macos) echo "  系统: macOS" ;; linux) echo "  系统: Linux ($(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" || uname -r))" ;; wsl) echo "  系统: Windows WSL2" ;; *) echo "  系统: $HOST_OS" ;; esac
   find_docker 2>/dev/null || true   # 在当前 shell 中补上 PATH，后面的启动步骤也能用
+  WIZ_DOCKER=0
   if ( need_docker ) 2>/dev/null; then
+    WIZ_DOCKER=1
     echo "  Docker: ${G}✔${N} $(docker version -f '{{.Server.Version}}' 2>/dev/null)  Compose: $(docker compose version --short 2>/dev/null)"
   else
     ( need_docker ) || true
@@ -786,8 +922,6 @@ cmd_wizard() {
   fi
   step 2 "网络出口";   until wizard_network; do echo "  ${Y}未保存，请重新选择${N}"; done
   step 3 "授权目录";   wizard_mounts
-  step 4 "AI 工具";    wizard_tools
-  step 5 "其他设置";   wizard_misc
   fix_owner "$CONF"
   wizard_summary
   if [ "$HOST_OS" != windows ] && ! command -v aibox >/dev/null 2>&1; then
@@ -799,7 +933,7 @@ cmd_wizard() {
   if yesno "现在启动？（首次需构建镜像，约 3-5 分钟）" y; then
     cmd_up
     echo; yesno "运行网络隔离体检？" y && ( cmd_doctor ) || true
-    echo; echo "开始使用: ${B}aibox claude${N} <项目>  或  ${B}aibox shell${N}    教程: ${B}aibox guide${N}"
+    echo; echo "开始使用: ${B}aibox claude${N} <项目>  或  ${B}aibox codex${N} <项目>（第一次运行时自动安装）  终端: ${B}aibox shell${N}"
   fi
 }
 
@@ -836,7 +970,6 @@ cmd_config() {
       case "$1" in
         AIBOX_UPSTREAM_PROXY) die "AIBOX_UPSTREAM_PROXY 已移除（严格出口策略），请用 aibox config proxy --sub <订阅>" ;;
         AIBOX_ALLOW_BROAD_MOUNT) die "AIBOX_ALLOW_BROAD_MOUNT 只能由用户手动写入 config/aibox.env" ;;
-        AIBOX_TOOLS) check_tools ${2:-} || exit 1 ;;
         AIBOX_PORTS) check_ports "${2:-}" || exit 1 ;;
         AIBOX_GATEWAY) case "${2:-}" in mihomo|gluetun) ;; *) die "AIBOX_GATEWAY 只能是 mihomo 或 gluetun" ;; esac ;;
       esac
@@ -847,36 +980,45 @@ cmd_config() {
         [ -t 0 ] || die "非交互用法: aibox config proxy --sub <订阅链接>（详见 aibox config help）"
         copy_examples >/dev/null; until wizard_network; do :; done; fix_owner "$CONF"; return
       fi
-      local subs=() nodes="" filter="" setf=0 gt="" input="" check=check
+      local subs=() nodes="" filter="" setf=0 gt="" input="" check=check test=1
       while [ $# -gt 0 ]; do
         case "$1" in
           -) input="$input$(cat)
 " ;;
           --no-check) check=nocheck ;;
+          --no-test) test=0 ;;
           --sub) [ -n "${2:-}" ] || die "--sub 需要订阅链接"; subs+=("$2"); shift ;;
           --nodes) [ -n "${2:-}" ] || die "--nodes 需要文件路径（- 表示标准输入）"; nodes="$2"; shift ;;
           --filter) filter="${2:-}"; setf=1; shift ;;
           --group) gt="${2:-}"; case "$gt" in fallback|url-test|load-balance) ;; *) die "--group 可选: fallback url-test load-balance" ;; esac; shift ;;
-          -*) die "未知参数 $1（可用: <链接>… | - | --sub URL | --nodes 文件|- | --filter 正则 | --group 策略 | --no-check）" ;;
+          -*) die "未知参数 $1（可用: <链接>… | - | --sub URL | --nodes 文件|- | --filter 正则 | --group 策略 | --no-check | --no-test）" ;;
           *) input="$input$1
 " ;;
         esac; shift
       done
-      copy_examples >/dev/null
+      copy_examples >/dev/null; snap_save
       if [ ${#subs[@]} -gt 0 ]; then input="$input$(printf '%s\n' "${subs[@]}")
 "; fi
       if [ -n "$input" ] && [ -n "$nodes" ]; then die "链接和 --nodes 二选一"; fi
       if [ -n "$(trim "$input")" ]; then
-        import_proxy "$input" "$check" || exit 1
+        import_proxy "$input" "$check" || { snap_restore; exit 1; }
         [ -z "$PROBE_NAMES" ] || show_probe_names
       elif [ -n "$nodes" ]; then
         local txt
         if [ "$nodes" = - ]; then txt="$(cat)"; else [ -f "$nodes" ] || die "文件不存在: $nodes"; txt="$(cat "$nodes")"; fi
-        write_nodes_upstream "$txt" || exit 1
+        write_nodes_upstream "$txt" || { snap_restore; exit 1; }
       elif [ "$setf" = 0 ] && [ -z "$gt" ]; then die "需要订阅链接、分享链接或 --nodes（例: aibox import \"<链接>\"）"; fi
       [ "$setf" = 1 ] && set_kv "$ENV_FILE" AIBOX_NODE_FILTER "$filter"
       [ -n "$gt" ] && set_kv "$ENV_FILE" AIBOX_GROUP_TYPE "$gt"
       set_kv "$ENV_FILE" AIBOX_GATEWAY mihomo; fix_owner "$CONF"
+      if [ "$test" = 1 ] && docker_ready; then
+        if ! ( load_env; proxy_test ); then
+          snap_restore; die "测试没有通过，已恢复原来的配置。确认节点可用后重试；确定要保存可以加 --no-test"
+        fi
+      elif [ "$test" = 1 ]; then
+        echo "  ${D}Docker 不可用，没有测试节点（之后运行 aibox test）${N}"
+      fi
+      snap_drop
       echo "已配置代理出口（mihomo）。aibox up 生效" ;;
     vpn)
       if [ $# -eq 0 ]; then
@@ -900,13 +1042,7 @@ cmd_config() {
         write_provider_vpn "$prov" "$vt" "${WIREGUARD_PRIVATE_KEY:-}" "${WIREGUARD_ADDRESSES:-}" "${OPENVPN_USER:-}" "${OPENVPN_PASSWORD:-}" "$countries" || exit 1
       else die "需要 --wireguard 或 --provider"; fi
       fix_owner "$CONF"; echo "已配置 VPN 出口（gluetun）。aibox up 生效" ;;
-    tools)
-      if [ $# -eq 0 ]; then
-        [ -t 0 ] || die "用法: aibox config tools claude codex"
-        copy_examples >/dev/null; wizard_tools; fix_owner "$CONF"; return
-      fi
-      check_tools "$@" || exit 1; copy_examples >/dev/null; set_kv "$ENV_FILE" AIBOX_TOOLS "$*"; fix_owner "$ENV_FILE"
-      echo "AI 工具: $*（aibox up 后自动安装缺失的）" ;;
+    tools) die "不再需要选择 AI 工具：第一次运行 aibox claude / aibox codex 时会自动安装" ;;
     ports)
       check_ports "${1:-}" || exit 1; copy_examples >/dev/null; set_kv "$ENV_FILE" AIBOX_PORTS "${1:-}"; fix_owner "$ENV_FILE"
       echo "映射端口: ${1:-无}（aibox up 生效）" ;;
@@ -933,7 +1069,6 @@ cmd_config() {
             check_wg_endpoint "$CONF/gluetun/wireguard/wg0.conf" || exit 1
           fi
         fi
-        check_tools ${AIBOX_TOOLS:-claude codex} || exit 1
         check_ports "${AIBOX_PORTS:-}" || exit 1
         echo "配置检查通过：网关 ${AIBOX_GATEWAY}，授权目录 $(list_projects | grep -c . || true) 个，端口 ${AIBOX_PORTS:-无}"
       ) ;;
@@ -942,6 +1077,7 @@ cmd_config() {
       case "${1:-env}" in env) f="$ENV_FILE" ;; mounts) f="$MOUNTS_FILE" ;; upstream|proxy) f="$UPSTREAM_FILE" ;; vpn|gluetun) f="$CONF/gluetun.env" ;; keys|workspace) f="$WS_ENV_FILE" ;; *) die "可选: env mounts upstream vpn keys" ;; esac
       copy_examples >/dev/null; "${EDITOR:-vi}" "$f" ;;
     mounts) [ -t 0 ] || die "非交互请用: aibox mounts add|rm"; copy_examples >/dev/null; wizard_mounts ;;
+    test) cmd_test ;;
     help|-h|--help) config_usage ;;
     *) config_usage; exit 1 ;;
   esac
@@ -958,7 +1094,9 @@ ${B}aibox config${N} — 配置（不带参数 = 交互式向导；带参数 = �
   ${B}网络出口${N}（二选一）
   aibox import "<订阅或分享链接>" [更多…]        自动识别格式（= aibox config proxy <链接>…）
   aibox import -                                从标准输入读取，例如 pbpaste | aibox import -
-                                                会先下载订阅检查格式和节点；--no-check 跳过
+                                                先下载订阅检查格式，再实际测试节点和出口 IP；
+                                                测试不通过时恢复原配置。--no-check / --no-test 跳过
+  aibox test                                    重新测试当前代理：可用节点、延迟、出口 IP、地区
   aibox config proxy --sub <订阅链接> [--sub <链接2>] [--filter <正则>] [--group fallback|url-test|load-balance]
   aibox config proxy --nodes <文件|->           Clash YAML 节点（- 表示从标准输入读取）
   aibox config vpn --wireguard <wg0.conf>       自建 WireGuard
@@ -967,11 +1105,10 @@ ${B}aibox config${N} — 配置（不带参数 = 交互式向导；带参数 = �
                                                 OPENVPN_USER OPENVPN_PASSWORD
   ${B}授权目录${N}
   aibox mounts add [rw|ro] <路径> [-> <名字>]   aibox mounts rm <名字|路径>   aibox mounts
-  ${B}其它${N}
-  aibox config tools claude codex [gemini opencode]
-  aibox config ports 3000,5173,8080:80          （空字符串 = 不映射）
+  ${B}其它${N}（一般不需要）
   printf %s "\$KEY" | aibox config key ANTHROPIC_API_KEY     （密钥只从标准输入读取）
   aibox config set AIBOX_<键> <值>   aibox config get AIBOX_<键>   aibox config edit env|mounts|upstream|vpn|keys
+  时区和语言默认按出口 IP 自动设置；要固定可以 aibox config set AIBOX_TZ Asia/Tokyo / AIBOX_LANG ja_JP.UTF-8
 
 修改后执行 ${B}aibox up${N} 生效。
 USAGE
@@ -1026,20 +1163,8 @@ cmd_up() {
     die "网关不健康：请检查节点/订阅或 VPN 配置是否可用（aibox logs gateway）"
   fi
   fix_netns
-  local missing; missing="$(missing_tools)"
-  if [ -n "$missing" ]; then
-    info "安装 AI 工具:${missing}（流量经网关）"
-    docker exec $TTY_FLAG -e AIBOX_TOOLS="${AIBOX_TOOLS:-claude codex}" "$WS" aibox-setup || warn "部分工具安装失败，可稍后运行 aibox setup 重试"
-  fi
+  geo_apply
   info "就绪。进入终端: ${B}aibox shell${N}   直接开始: ${B}aibox claude${N} <项目>"
-}
-
-missing_tools() {  # 输出 AIBOX_TOOLS 中容器里还没有安装的工具
-  local t out=""
-  for t in ${AIBOX_TOOLS:-claude codex}; do
-    docker exec "$WS" bash -lc "command -v $t" >/dev/null 2>&1 || out="$out $t"
-  done
-  printf '%s' "$out"
 }
 
 ensure_up() {
@@ -1070,7 +1195,8 @@ cmd_shell() {
     if list_projects | grep -qxF "${arg%%/*}"; then dir="/workspace/$arg"; fi
     session="$(session_name "$arg")"
   fi
-  local env=(-e TERM=xterm-256color -e COLORTERM=truecolor -w "$dir")
+  geo_args
+  local env=(-e TERM=xterm-256color -e COLORTERM=truecolor ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} -w "$dir")
   if [ "$raw" = 1 ]; then exec docker exec $TTY_FLAG "${env[@]}" "$WS" bash -l; fi
   exec docker exec $TTY_FLAG "${env[@]}" "$WS" tmux new-session -A -s "$session" -c "$dir"
 }
@@ -1089,7 +1215,11 @@ cmd_agent() {
     esac; shift
   done
   ensure_up
-  case " ${AIBOX_TOOLS:-claude codex} " in *" $tool "*) ;; *) warn "$tool 不在 AIBOX_TOOLS 中，如未安装请运行: aibox config set AIBOX_TOOLS \"${AIBOX_TOOLS:-} $tool\" && aibox setup" ;; esac
+  if ! docker exec "$WS" bash -lc "command -v $tool" >/dev/null 2>&1; then
+    info "第一次使用 ${tool}，正在安装（经网关下载，之后保存在持久化 home 中）"
+    docker exec $TTY_FLAG "$WS" aibox-setup "$tool" || die "$tool 安装失败。检查网络: aibox doctor；重试: aibox setup $tool"
+  fi
+  geo_args
   if [ "$yolo" = 1 ]; then   # 容器即沙箱：跳过工具自身的逐条确认
     case "$tool" in
       claude) args=(--dangerously-skip-permissions ${args[@]+"${args[@]}"}) ;;
@@ -1105,15 +1235,15 @@ cmd_agent() {
   else
     info "在 $dir 启动 ${tool}（会话 ${sess}；Ctrl+b d 离开后任务继续，再次运行同一命令即可回来）"
   fi
-  exec docker exec $TTY_FLAG -e TERM=xterm-256color -e COLORTERM=truecolor -w "$dir" "$WS" \
+  exec docker exec $TTY_FLAG -e TERM=xterm-256color -e COLORTERM=truecolor ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} -w "$dir" "$WS" \
     tmux new-session -A -s "$sess" -c "$dir" -n "$tool" \
     bash -lc '"$@"; echo; echo "[$1 已退出，当前为普通 shell；exit 关闭会话]"; exec bash -l' _ "$tool" ${args[@]+"${args[@]}"}
 }
 
 cmd_exec() {
   [ $# -gt 0 ] || die "用法: aibox exec <命令> [参数...]"
-  ensure_up
-  exec docker exec $TTY_FLAG -e TERM=xterm-256color -w /workspace "$WS" "$@"
+  ensure_up; geo_args
+  exec docker exec $TTY_FLAG -e TERM=xterm-256color ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} -w /workspace "$WS" "$@"
 }
 
 cmd_sessions() {
@@ -1129,7 +1259,7 @@ cmd_logs() {   # 终端中持续跟随；非终端（agent / 脚本）只输出�
   local follow=(); [ -t 1 ] && follow=(-f)
   compose logs ${follow[@]+"${follow[@]}"} --tail=200 "$@"
 }
-cmd_setup()   { ensure_up; docker exec $TTY_FLAG -e AIBOX_TOOLS="${AIBOX_TOOLS:-claude codex}" "$WS" aibox-setup "$@"; }
+cmd_setup()   { ensure_up; docker exec $TTY_FLAG "$WS" aibox-setup "$@"; }   # aibox setup <工具…> [--upgrade]
 
 cmd_rebuild() {
   need_docker; load_env; gen_override
@@ -1223,7 +1353,7 @@ cmd_install() {
 }
 
 cmd_completion() {
-  local cmds="init import config up shell claude codex gemini opencode sessions exec stop restart down status doctor mounts logs setup rebuild guide install destroy help"
+  local cmds="init import test config up shell claude codex gemini opencode sessions exec stop restart down status doctor mounts logs setup rebuild guide install destroy help"
   case "${1:-bash}" in
     zsh) cat <<EOF
 # macOS 自带的 zsh 默认没有启用补全系统；没有 compdef 时先初始化
@@ -1234,7 +1364,7 @@ _aibox() {
   case \$words[2] in
     claude|codex|gemini|opencode|shell|c|x|cx|s) (( CURRENT == 3 )) && compadd -- \$(aibox projects 2>/dev/null) ;;
     mounts) (( CURRENT == 3 )) && compadd list add rm ;;
-    config) (( CURRENT == 3 )) && compadd show check set get edit proxy vpn network mounts tools ports key help ;;
+    config) (( CURRENT == 3 )) && compadd show check test set get edit proxy vpn network mounts key help ;;
     logs) compadd gateway workspace ;;
   esac
 }
@@ -1248,7 +1378,7 @@ _aibox() {
   case \${COMP_WORDS[1]} in
     claude|codex|gemini|opencode|shell|c|x|cx|s) [ \$COMP_CWORD -eq 2 ] && COMPREPLY=(\$(compgen -W "\$(aibox projects 2>/dev/null)" -- "\$cur")) ;;
     mounts) COMPREPLY=(\$(compgen -W "list add rm" -- "\$cur")) ;;
-    config) COMPREPLY=(\$(compgen -W "show check set get edit proxy vpn network mounts tools ports key help" -- "\$cur")) ;;
+    config) COMPREPLY=(\$(compgen -W "show check test set get edit proxy vpn network mounts key help" -- "\$cur")) ;;
     logs) COMPREPLY=(\$(compgen -W "gateway workspace" -- "\$cur")) ;;
   esac
 }
@@ -1293,6 +1423,7 @@ cmd_doctor() {
     warn "容器出口与宿主机相同：若宿主机没有开全局 VPN，说明代理/VPN 服务器就在本机网络中，请检查出口配置"
   fi
 
+  geo_load 2>/dev/null && echo "    地区: $(geo_where) → 时区 $(geo_tz)，语言 $(geo_lang)"
   echo "${B}IPv6${N}"
   if dexec 'curl -6 -fsS --max-time 5 https://api6.ipify.org' >/dev/null 2>&1; then bad "IPv6 可以出网（存在泄漏风险）"; else ok "IPv6 出网被阻断"; fi
   [ -z "$(dexec 'ip -6 addr show scope global 2>/dev/null')" ] && ok "无全局 IPv6 地址" || bad "存在全局 IPv6 地址"
@@ -1370,20 +1501,20 @@ ${B}aibox${N} — Docker 中的 AI 编程终端（Claude Code / Codex），网�
 ${B}开始${N}
   init                  配置向导（首次使用）        ${D}--defaults 生成默认配置不提问${N}
   config                交互式修改配置；带参数时为非交互（agent / 脚本），见 aibox config help
-  up                    启动（首次构建镜像并安装 AI 工具）
+  up                    启动（首次构建镜像，约 3-5 分钟）
   guide                 配置与使用指南（人和 agent 通用）
 
 ${B}一键导入出口${N}（自动识别订阅、v2rayN/Shadowrocket 分享链接、clash:// 导入链接、Base64）
   import "<链接>" [更多链接…] [--filter 正则]   pbpaste | aibox import -   （简写 i）
+  test                  测试节点：可用数量、延迟、出口 IP 和地区                    t
 
 ${B}非交互配置${N}（不提问，失败返回非 0 且不改动原配置）
   config proxy --sub <订阅链接> [--filter 正则]     config vpn --wireguard <wg0.conf>
-  mounts add [rw|ro] <路径>    mounts rm <名字>     config tools claude codex
-  config ports 3000,5173       config key <变量名>（值从标准输入读取）
+  mounts add [rw|ro] <路径>    mounts rm <名字>     config key <变量名>（值从标准输入读取）
   config check                 config show           config set AIBOX_<键> <值>
 
 ${B}日常${N}                                                    ${D}简写${N}
-  claude [项目] [参数]  在项目目录启动 Claude Code（独立会话，可恢复）   c
+  claude [项目] [参数]  在项目目录启动 Claude Code（第一次自动安装；会话可恢复） c
   codex  [项目] [参数]  在项目目录启动 Codex                              x
         --yolo          跳过逐条确认（容器即沙箱）   --new  新开会话而不是恢复
   shell  [项目]         进入终端（tmux；断开后可恢复）  --bash 不用 tmux   s
@@ -1395,7 +1526,7 @@ ${B}日常${N}                                                    ${D}简写${N}
 ${B}管理${N}
   mounts [add|rm]       授权目录: aibox mounts add ro ~/docs | aibox mounts rm docs
   doctor [--full]       网络与挂载体检（--full 含断线阻断测试）           d
-  logs [gateway|workspace]   setup [--upgrade]   rebuild   down   destroy
+  logs [gateway|workspace]   setup <工具…> | --upgrade   rebuild   down   destroy
   install [短命令名]    安装到 PATH（默认短命令 ai）并添加 Tab 补全
 EOF
 }
@@ -1405,6 +1536,7 @@ case "$cmd" in
   init) cmd_init "$@" ;;
   config|cfg) cmd_config "$@" ;;
   import|i) cmd_config proxy "$@" ;;
+  test|t) cmd_test ;;
   up|start|u) cmd_up "$@" ;;
   shell|enter|sh|s) cmd_shell "$@" ;;
   claude|c) cmd_agent claude "$@" ;;

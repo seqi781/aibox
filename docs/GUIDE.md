@@ -15,17 +15,20 @@
 aibox config          # 之后修改任何配置，再次运行向导即可（已有配置作为默认值）
 ```
 
-向导共 5 步，每一步回车都会采用 `[方括号]` 里的默认值：
+向导只有 3 步，只问必须由你决定的事，每一步回车都会采用 `[方括号]` 里的默认值：
 
 | 步骤 | 问什么 | 说明 |
 |---|---|---|
 | 1 环境检查 | 不提问 | 检查 Docker / Compose 版本，Linux 上还检查 TUN 设备。Docker 没装好也可以先完成配置 |
-| 2 网络出口 | 订阅或分享链接 / Clash 节点 / WireGuard / 商业 VPN | 必填。粘贴什么格式都行，会自动识别（见下文）。不支持用本机的 Clash、v2rayN 中转 |
-| 3 授权目录 | 目录路径（支持 Tab 补全）+ rw/ro | 只有这里的目录对容器可见 |
-| 4 AI 工具 | 工具、端口、API Key | 用订阅账号登录的可以跳过 API Key |
-| 5 其他 | 时区、国内镜像源、SELinux | SELinux 只在检测到时才会问 |
+| 2 网络出口 | 粘贴订阅或分享链接（也支持 Clash 节点 / WireGuard / 商业 VPN） | 自动识别格式，**立即测试**并汇报可用节点、延迟、出口 IP 和地区；测试不通过可以重新输入 |
+| 3 授权目录 | 目录路径（支持 Tab 补全）+ rw/ro | 只有这里的目录对容器可见。检测到 SELinux 时多问一句 |
 
 最后会问是否安装 `aibox` / `ai` 命令、是否立即启动、是否运行体检。
+
+其余的都自动处理，不需要你选：
+- **时区和语言**：按出口 IP 的地区自动设置（例如出口在日本，就是 `Asia/Tokyo` + `ja_JP.UTF-8`），每次 `aibox up` 都会重新检测。要固定的话，用 `aibox config set AIBOX_TZ …` / `AIBOX_LANG …`。
+- **AI 工具**：不预装。第一次运行 `aibox claude` / `aibox codex`，或者在容器里直接输入 `claude` / `codex` 时自动安装，之后保存在持久化 home 卷里。
+- **镜像下载、端口映射**：拉取镜像用的是你电脑本身的网络，aibox 不干预；开发服务器的端口在开发过程中按需处理（见第 2 节"高级"）。
 
 ### 一键导入出口（自动识别格式）
 
@@ -52,7 +55,6 @@ pbpaste | aibox import -                            # macOS：从剪贴板读取
 ```bash
 aibox config network     # 只改出口
 aibox config mounts      # 只改授权目录
-aibox config tools       # 只改 AI 工具 / 端口 / API Key
 ```
 
 ---
@@ -94,9 +96,8 @@ tmux 常用键：`Ctrl+b d` 离开（任务继续运行）· `Ctrl+b c` 新窗�
 | `WIREGUARD_PRIVATE_KEY=... aibox config vpn --provider mullvad [--countries Japan]` | 商业 VPN（密钥从环境变量读取） |
 | `aibox mounts add [rw\|ro] <路径> [-> <名字>]` | 授权目录（默认 rw） |
 | `aibox mounts rm <名字\|路径>` / `aibox mounts` | 取消授权 / 查看列表 |
-| `aibox config tools claude codex` | 要安装的 AI 工具 |
-| `aibox config ports 3000,5173` | 映射端口（空字符串表示不映射） |
-| `printf %s "$KEY" \| aibox config key ANTHROPIC_API_KEY` | 保存 API Key（只从标准输入读取） |
+| `aibox test` | 重新测试当前代理：可用节点、延迟、出口 IP、地区 |
+| `printf %s "$KEY" \| aibox config key ANTHROPIC_API_KEY` | 保存 API Key（只从标准输入读取；用账号登录的不需要） |
 | `aibox config key ANTHROPIC_API_KEY --unset` | 删除 API Key |
 | `aibox config set AIBOX_TZ Asia/Shanghai` / `config get <键>` | 修改 / 读取其它选项 |
 | `aibox config check` | 校验全部配置（不需要 Docker） |
@@ -127,12 +128,10 @@ printf %s "$USER_INPUT" | ./aibox import - --filter '日本|JP'
 ./aibox mounts add rw ~/code/my-app
 ./aibox mounts add ro ~/Documents/specs
 
-# 4. 可选：工具、端口、密钥（密钥只能从标准输入传入）
-./aibox config tools claude codex
-./aibox config ports 3000
+# 4. 可选：用户要用 API Key 时（密钥只能从标准输入传入）
 printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
 
-# 5. 校验 → 启动 → 体检
+# 5. 校验 → 启动 → 体检（AI 工具不用配置，用户第一次运行 aibox claude 时自动安装）
 ./aibox config check      # 返回 0 才继续
 ./aibox up                # 首次 3～5 分钟；返回非 0 时读 stderr 和 aibox logs gateway
 ./aibox doctor --full     # 返回 0 表示网络隔离全部检查通过
@@ -149,6 +148,7 @@ printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
 | `分享链接的服务器 … 是本机/宿主机/局域网地址` | 例如 v2rayN 本地端口 `socks://…@127.0.0.1:10808` | 请用户导出远程节点的分享链接或订阅 |
 | `指向本机/宿主机/局域网地址` | 用户给的是本机 Clash 的地址（如 127.0.0.1:7890） | 请用户提供 Clash 里的订阅链接 |
 | `节点解析到了本机/宿主机/局域网地址` | 订阅里的节点域名解析到了内网地址 | 换一个订阅或节点 |
+| `测试没有通过，已恢复原来的配置` | 节点都连不上、订阅下载失败，或筛选没匹配到 | 把测试输出告诉用户；用户确认节点没问题时可以加 `--no-test` |
 | `没有可用节点，网关已断网` | 节点筛选没匹配到任何节点，或订阅下载失败 | 告诉用户；取消筛选用 `aibox config proxy --filter ''`，订阅问题看 `aibox logs gateway` |
 | `网关不健康` | 节点连不上 | 运行 `aibox logs gateway`，把原因告诉用户 |
 | `服务器 … 是本机/宿主机/局域网地址` | WireGuard 的 Endpoint 指向本地网络 | 请用户提供远程 VPN 服务器的配置 |
@@ -182,7 +182,8 @@ aibox codex myapp      # 在 Codex 里选择登录；容器内没有浏览器，
 - **项目说明文件**：在项目根目录放 `CLAUDE.md`（Claude Code）或 `AGENTS.md`（Codex），写上构建、测试命令和约定，agent 会自动读取。
 - **git 与 SSH**：建议在容器内单独生成密钥（`ssh-keygen`，保存在持久化 home 卷），只加到需要的仓库，而不是挂载 Mac 上的 `~/.ssh`。
 - **安装依赖**：`npm i -g` 和 `pip install --user` 装在 home 卷里，会一直保留。`sudo apt install` 装的包在 `aibox rebuild` 后会消失，需要长期使用的写进 `AIBOX_EXTRA_PACKAGES`。
-- **升级工具**：Claude Code 会自动更新；其它工具运行 `aibox setup --upgrade`。
+- **AI 工具**：第一次使用时自动安装。Claude Code 会自己更新；其它工具运行 `aibox setup --upgrade`。也支持 `gemini`、`opencode`（`aibox gemini <项目>`）。
+- **从本机浏览器访问容器里的开发服务器**：网关防火墙默认不接受外部连接。需要时运行 `aibox config ports 3000`（多个用逗号分隔），服务监听 `0.0.0.0`，执行 `aibox up` 后访问 `http://127.0.0.1:3000`。
 
 ---
 
@@ -211,5 +212,6 @@ aibox codex myapp      # 在 Codex 里选择登录；容器内没有浏览器，
 | `aibox up` 报网关不健康 | 运行 `aibox logs gateway`。常见原因是订阅下载失败（检查链接）或节点全部不可用 |
 | 进入容器后没有网络 | `aibox status` 查看网关健康状态；网关重启过的话，任意 `aibox` 命令都会自动重新接入 |
 | 挂载目录里写不了文件 | `aibox doctor` 查看挂载权限；Linux 上检查宿主机目录的属主，SELinux 系统开启 `AIBOX_SELINUX_RELABEL` |
-| 构建镜像很慢 | `aibox config set AIBOX_APT_MIRROR http://mirrors.tuna.tsinghua.edu.cn`，并为 Docker 配置镜像加速 |
+| 构建镜像很慢 | 构建用的是你电脑本身的网络。可以为 Docker 配置镜像加速，或在电脑上开启代理后再运行 `aibox up` |
+| 时区 / 语言不对 | 它们跟随出口 IP 的地区；`aibox test` 查看检测结果。要固定：`aibox config set AIBOX_TZ Asia/Tokyo`、`aibox config set AIBOX_LANG ja_JP.UTF-8`，然后 `aibox up` |
 | 想彻底重来 | `aibox destroy`（删除容器和 home 卷，项目文件不受影响），然后 `aibox init` |

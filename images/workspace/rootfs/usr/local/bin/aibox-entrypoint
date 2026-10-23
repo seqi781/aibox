@@ -4,4 +4,9 @@ if [ "$(stat -c %u "$HOME")" != "$(id -u)" ]; then
   sudo chown -R "$(id -u):$(id -g)" "$HOME"
 fi
 mkdir -p "$HOME/.npm-global" "$HOME/.local/bin"
+# 重建容器后恢复之前按出口地区设置的语言（locale 生成在容器层，不在 home 卷里）
+lang="$(sed -n 's/^LANG=//p' "$HOME/.config/aibox/locale.env" 2>/dev/null)"
+if [ -n "$lang" ] && ! locale -a 2>/dev/null | grep -qix "${lang%%.*}.utf8"; then
+  sudo localedef -i "${lang%%.*}" -f UTF-8 "$lang" 2>/dev/null || true
+fi
 exec "$@"

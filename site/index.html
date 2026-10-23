@@ -343,7 +343,7 @@ claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
   <div class="shell">
     <p class="eyebrow">GET STARTED</p>
     <h2 class="h2" id="start-title">三步上手，<br>剩下的交给向导。</h2>
-    <p class="lede">需要准备：Docker，以及一个代理订阅、Clash 节点或 WireGuard 配置。首次启动要构建镜像并安装 AI 工具，大约 3～5 分钟。</p>
+    <p class="lede">需要准备：Docker，以及一个代理订阅、Clash 节点或 WireGuard 配置。首次启动要构建镜像，大约 3～5 分钟。</p>
 
     <div class="two sec-body">
       <ol class="steps">
@@ -367,7 +367,7 @@ claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
           <span class="n">[2]</span>
           <div>
             <h3>获取 aibox，运行配置向导</h3>
-            <p>向导会问出口、授权目录和 AI 工具，每一步回车即采用默认值。最后可以安装 <code>aibox</code> / <code>ai</code> 命令和 Tab 补全，直接启动并体检。</p>
+            <p>向导只问两件事：出口（粘贴订阅或分享链接，自动识别并当场测试）和授权目录，回车即采用默认值。最后可以安装 <code>aibox</code> / <code>ai</code> 命令和 Tab 补全，直接启动并体检。</p>
             <div class="code"><div class="code-bar"><span>bash</span><button class="mini copy" type="button" data-target="c-init">复制</button></div>
 <pre id="c-init">git clone https://github.com/OWNER/aibox ~/aibox
 cd ~/aibox
@@ -385,12 +385,11 @@ cd ~/aibox
       </ol>
 
       <div>
-        <ul class="checks" aria-label="配置向导的 5 个步骤">
-          <li><span>[1/5]</span>环境检查：Docker、Compose 版本，Linux 上还检查 TUN 设备。</li>
-          <li><span>[2/5]</span>网络出口：订阅、节点、WireGuard 或商业 VPN，必填。</li>
-          <li><span>[3/5]</span>授权目录：路径支持 Tab 补全，每个目录选 rw 或 ro。</li>
-          <li><span>[4/5]</span>AI 工具：要装的工具、端口映射、API Key（用订阅账号登录可跳过）。</li>
-          <li><span>[5/5]</span>其他设置：时区、国内镜像源；检测到 SELinux 时才会询问。</li>
+        <ul class="checks" aria-label="配置向导的 3 个步骤">
+          <li><span>[1/3]</span>环境检查：Docker、Compose 版本，Linux 上还检查 TUN 设备。</li>
+          <li><span>[2/3]</span>网络出口：粘贴订阅或分享链接，自动识别格式，当场测试并汇报可用节点、延迟、出口 IP 和地区。</li>
+          <li><span>[3/3]</span>授权目录：路径支持 Tab 补全，每个目录选 rw 或 ro。</li>
+          <li><span>自动</span>时区和语言跟随出口 IP 的地区；AI 工具第一次使用时自动安装。</li>
         </ul>
         <ul class="checks cmds below" aria-label="日常命令">
           <li><span><code>ai c myapp</code></span>在 /workspace/myapp 启动 Claude Code</li>
@@ -416,10 +415,9 @@ cd ~/aibox
       <div class="code">
         <div class="code-bar"><span>非交互配置 · 订阅链接和目录换成你自己的</span><button class="mini copy" type="button" data-target="c-agent">复制</button></div>
 <pre id="c-agent">./aibox init --defaults                     <span class="c"># 生成默认配置，不覆盖已有配置</span>
-./aibox config proxy --sub "https://example.com/your-sub" --filter '日本|JP'
+./aibox import "https://example.com/your-sub" --filter '日本|JP'   <span class="c"># 自动识别并测试</span>
 ./aibox mounts add rw ~/code/myapp
 ./aibox mounts add ro ~/Documents/specs
-./aibox config tools claude codex
 <span class="c"># 可选：用 API Key 而不是账号登录时</span>
 printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
 ./aibox config check &amp;&amp; ./aibox up &amp;&amp; ./aibox doctor --full</pre>
@@ -515,7 +513,7 @@ printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
       <details>
         <summary><span>首次启动要多久？</span></summary>
         <div class="ans">
-          <p>大约 3～5 分钟：构建两个镜像，再经隧道安装你选择的 AI 工具。之后再启动不需要重新构建，AI 工具、登录凭据和 shell 历史都保存在持久化的 home 卷里。</p>
+          <p>大约 3～5 分钟，主要是构建两个镜像。AI 工具在第一次运行 <code>ai c</code> / <code>ai x</code> 时经隧道安装。之后再启动不需要重新构建，AI 工具、登录凭据和 shell 历史都保存在持久化的 home 卷里。</p>
         </div>
       </details>
       <details>

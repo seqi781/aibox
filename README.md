@@ -24,8 +24,7 @@
 ```bash
 git clone <仓库地址> ~/aibox     # 或直接复制整个目录
 cd ~/aibox
-./aibox init                      # 交互式向导：出口 → 授权目录 → AI 工具 → 其它，最后可以直接启动
-                                  # 出口一步直接粘贴订阅或分享链接，自动识别 Clash / v2rayN / Shadowrocket 等格式
+./aibox init                      # 向导只有 3 步：环境检查 → 粘贴订阅或分享链接（自动识别并测试）→ 授权目录
 ```
 
 向导里会问是否安装 `aibox` / `ai` 命令和 Tab 补全，选"是"以后就能在任意目录使用。
@@ -63,6 +62,7 @@ aibox up                              # 改完后执行，使配置生效
 - **我用的是 v2rayN / Shadowrocket / sing-box，能用吗？** 能。把订阅链接或节点分享链接直接粘贴进来，格式会自动识别：`aibox import "<链接>"`，或者 `pbpaste | aibox import -`（macOS，从剪贴板读取）。
 - **能不能直接用电脑上正在运行的 Clash？** 不能，这是有意的设计。Clash 的分流规则可能让部分流量直连，出口就不受控了。请把 Clash 里的订阅链接填进来。指向本机或局域网的节点会被拒绝。
 - **`aibox up` 报网关不健康**：节点连不上，或订阅下载失败。运行 `aibox logs gateway` 查看原因。
-- **在宿主机浏览器访问容器里的开发服务器**：`aibox config ports 3000`，服务监听 `0.0.0.0`，然后访问 `http://127.0.0.1:3000`。
+- **AI 工具怎么装？** 不用装。第一次运行 `ai c` / `ai x`，或者在容器里输入 `claude` / `codex` 时自动安装。
+- **时区和语言？** 自动按代理出口 IP 的地区设置，和出口保持一致；要固定见 [指南](docs/GUIDE.md#6-故障排查)。
 - **Linux 上提示无权访问 Docker**：`sudo usermod -aG docker $USER` 后重新登录；临时也可以用 `sudo aibox ...`，文件归属会自动处理。
 - **验证网络隔离**：`aibox doctor --full`，全部打 ✔ 即正常。

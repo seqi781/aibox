@@ -17,11 +17,26 @@ PS1='\[\e[35m\][aibox]\[\e[0m\] \[\e[32m\]\u\[\e[0m\]:\[\e[34m\]\w\[\e[33m\]$(__
 # 新开的终端窗口显示欢迎信息（子 shell 不重复）
 if [ -z "${AIBOX_WELCOMED:-}" ]; then
   export AIBOX_WELCOMED=1
-  echo -e "\e[35maibox\e[0m 网关: ${AIBOX_GATEWAY:-?} | 项目目录: /workspace | 命令: claude, codex, tmux"
+  echo -e "\e[35maibox\e[0m 网关: ${AIBOX_GATEWAY:-?} | 项目目录: /workspace | 命令: claude, codex（首次运行自动安装）, tmux"
   if [ -n "${AIBOX_MOUNTS:-}" ]; then
     echo "$AIBOX_MOUNTS" | tr ';' '\n' | sed '/^$/d; s/^/  挂载 /'
   else
     echo "  (未挂载任何宿主机目录，编辑 config/mounts.conf 后执行 aibox up)"
   fi
-  [ -f "$HOME/.cache/aibox-setup.done" ] || echo "  AI 工具尚未安装：运行 aibox-setup"
+  # （/etc/profile 先读本文件、后读 profile.d，所以这里直接读文件）
+  if [ -r "$HOME/.config/aibox/locale.env" ]; then
+    echo "  时区 $(sed -n 's/^TZ=//p' "$HOME/.config/aibox/locale.env") · 语言 $(sed -n 's/^LANG=//p' "$HOME/.config/aibox/locale.env")（按出口 IP 地区自动设置）"
+  fi
 fi
+
+# 第一次输入 claude / codex 等命令时自动安装（之后保存在持久化 home 中）
+command_not_found_handle() {
+  case "$1" in
+    claude|codex|gemini|opencode)
+      echo "首次使用 ${1}，正在安装…" >&2
+      aibox-setup "$1" >&2 && hash -r && "$@"
+      return $? ;;
+  esac
+  printf 'bash: %s: command not found\n' "$1" >&2
+  return 127
+}

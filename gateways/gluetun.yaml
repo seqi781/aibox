@@ -15,7 +15,6 @@ services:
       - path: ./config/gluetun.env
         required: true
     environment:
-      TZ: ${AIBOX_TZ:-UTC}
       FIREWALL_INPUT_PORTS: ${AIBOX_INPUT_PORTS:-}
       FIREWALL_OUTBOUND_SUBNETS: ${AIBOX_ALLOW_DIRECT_CIDRS:-}
       HTTPPROXY: "off"

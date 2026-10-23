@@ -325,7 +325,7 @@ claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
   <div class="shell">
     <p class="eyebrow">GET STARTED</p>
     <h2 class="h2" id="start-title">Three steps.<br>The wizard does the rest.</h2>
-    <p class="lede">You'll need Docker, plus a proxy subscription, Clash nodes or a WireGuard config. The first start builds images and installs the AI tools, which takes about 3–5 minutes. The CLI and wizard currently speak Chinese.</p>
+    <p class="lede">You'll need Docker, plus a proxy subscription, Clash nodes or a WireGuard config. The first start builds the images, which takes about 3–5 minutes. The CLI and wizard currently speak Chinese.</p>
 
     <div class="two sec-body">
       <ol class="steps">
@@ -349,7 +349,7 @@ claude-myapp    窗口:1  创建于 Fri Oct 23 10:02:11 2026
           <span class="n">[2]</span>
           <div>
             <h3>Get aibox and run the wizard</h3>
-            <p>It asks about egress, granted folders and AI tools; press Enter to accept defaults. At the end it can install the <code>aibox</code> / <code>ai</code> commands with Tab completion, start everything and run the checks.</p>
+            <p>It asks only two things: egress (paste a subscription or share links; the format is detected and tested on the spot) and granted folders. Press Enter to accept defaults. At the end it can install the <code>aibox</code> / <code>ai</code> commands with Tab completion, start everything and run the checks.</p>
             <div class="code"><div class="code-bar"><span>bash</span><button class="mini copy" type="button" data-target="c-init">Copy</button></div>
 <pre id="c-init">git clone https://github.com/OWNER/aibox ~/aibox
 cd ~/aibox
@@ -367,12 +367,11 @@ cd ~/aibox
       </ol>
 
       <div>
-        <ul class="checks" aria-label="The wizard's five steps">
-          <li><span>[1/5]</span>Environment: Docker and Compose versions, plus the TUN device on Linux.</li>
-          <li><span>[2/5]</span>Egress: subscription, nodes, WireGuard or a commercial VPN. Required.</li>
-          <li><span>[3/5]</span>Folders: paths with Tab completion, each set to rw or ro.</li>
-          <li><span>[4/5]</span>AI tools: which tools, port mappings, API keys (skip if you log in with an account).</li>
-          <li><span>[5/5]</span>Other: time zone, mirror for faster builds; SELinux only if detected.</li>
+        <ul class="checks" aria-label="The wizard's three steps">
+          <li><span>[1/3]</span>Environment: Docker and Compose versions, plus the TUN device on Linux.</li>
+          <li><span>[2/3]</span>Egress: paste a subscription or share links. aibox detects the format, tests it and reports working nodes, latency, exit IP and region.</li>
+          <li><span>[3/3]</span>Folders: paths with Tab completion, each set to rw or ro.</li>
+          <li><span>auto</span>Time zone and language follow the exit IP's region; AI tools install on first use.</li>
         </ul>
         <ul class="checks cmds below" aria-label="Everyday commands">
           <li><span><code>ai c myapp</code></span>Start Claude Code in /workspace/myapp</li>
@@ -397,10 +396,9 @@ cd ~/aibox
       <div class="code">
         <div class="code-bar"><span>Non-interactive setup · use your own URL and folders</span><button class="mini copy" type="button" data-target="c-agent">Copy</button></div>
 <pre id="c-agent">./aibox init --defaults                     <span class="c"># default config; never overwrites</span>
-./aibox config proxy --sub "https://example.com/your-sub" --filter 'JP'
+./aibox import "https://example.com/your-sub" --filter 'JP'   <span class="c"># detected and tested</span>
 ./aibox mounts add rw ~/code/myapp
 ./aibox mounts add ro ~/Documents/specs
-./aibox config tools claude codex
 <span class="c"># optional: only if you use an API key instead of logging in</span>
 printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
 ./aibox config check &amp;&amp; ./aibox up &amp;&amp; ./aibox doctor --full</pre>
@@ -494,7 +492,7 @@ printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
       <details>
         <summary><span>How long does the first start take?</span></summary>
         <div class="ans">
-          <p>About 3–5 minutes: two images are built, then the AI tools you chose are installed through the tunnel. Later starts don't rebuild; tools, logins and shell history live in a persistent home volume.</p>
+          <p>About 3–5 minutes, mostly building two images. AI tools are installed through the tunnel the first time you run <code>ai c</code> / <code>ai x</code>. Later starts don't rebuild; tools, logins and shell history live in a persistent home volume.</p>
         </div>
       </details>
       <details>

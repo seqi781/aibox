@@ -1,11 +1,11 @@
 # aibox 工作区：Debian 13 + Node 24 LTS + 常用开发工具 + tmux
-# AI 工具（Claude Code / Codex）不打进镜像，首次启动时经网关安装到持久化 home，可自动更新
+# AI 工具不打进镜像：第一次使用时经网关安装到持久化 home（aibox claude / codex，或在容器里直接输入命令）
+# 时区和语言在运行时按出口 IP 设置（见 aibox 的 geo_apply 与 /etc/profile.d/aibox-locale.sh）
 FROM node:24-trixie-slim
 
 ARG USER_UID=1000
 ARG USER_GID=1000
 ARG USERNAME=dev
-ARG APT_MIRROR=
 ARG EXTRA_PACKAGES=
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 \
@@ -15,7 +15,6 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     PATH=/home/${USERNAME}/.local/bin:/home/${USERNAME}/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN set -eux; \
-    if [ -n "$APT_MIRROR" ]; then sed -i "s|http://deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       bash-completion ca-certificates curl wget gnupg git git-lfs openssh-client \
@@ -23,7 +22,7 @@ RUN set -eux; \
       procps psmisc htop lsof iproute2 iputils-ping dnsutils netcat-openbsd \
       ripgrep fd-find jq tree unzip zip xz-utils bzip2 file patch rsync \
       python3 python3-pip python3-venv build-essential pkg-config \
-      sudo tzdata $EXTRA_PACKAGES; \
+      sudo tzdata locales $EXTRA_PACKAGES; \
     ln -sf /usr/bin/fdfind /usr/local/bin/fd; \
     rm -rf /var/lib/apt/lists/*
 

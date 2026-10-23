@@ -9,7 +9,6 @@ services:
         USER_UID: ${AIBOX_UID:-1000}
         USER_GID: ${AIBOX_GID:-1000}
         EXTRA_PACKAGES: ${AIBOX_EXTRA_PACKAGES:-}
-        APT_MIRROR: ${AIBOX_APT_MIRROR:-}
     image: aibox/workspace:latest
     container_name: aibox-workspace
     # 关键：没有自己的网卡，完全共享 gateway 的网络命名空间
@@ -25,15 +24,14 @@ services:
     # 默认能力集中本就没有 NET_ADMIN；再去掉 NET_RAW。workspace 内即使 sudo 成 root
     # 也无法修改路由/防火墙，只能走网关的隧道
     cap_drop: [NET_RAW, NET_ADMIN, SYS_ADMIN, SYS_MODULE]
+    # 时区和语言不放在这里：aibox up 按出口 IP 写入 ~/.config/aibox/locale.env，改变时不需要重建容器
     environment:
-      TZ: ${AIBOX_TZ:-UTC}
       AIBOX_GATEWAY: ${AIBOX_GATEWAY:-mihomo}
-      AIBOX_TOOLS: ${AIBOX_TOOLS:-claude codex}
     env_file:
       - path: ./config/workspace.env
         required: false
     volumes:
-      - home:/home/dev   # 持久化：shell 历史、~/.claude、~/.codex、npm 全局包等
+      - home:/home/dev   # 持久化：AI 工具与登录凭据、shell 历史、npm 全局包等
     working_dir: /workspace
 
 volumes:

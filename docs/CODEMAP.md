@@ -22,7 +22,8 @@ images/
   workspace/                   工作容器镜像（Debian 13 + Node 24 + 开发工具）
     Dockerfile
     rootfs/usr/local/bin/aibox-entrypoint   修正 home 卷归属
-    rootfs/usr/local/bin/aibox-setup        安装 claude / codex / gemini / opencode
+    rootfs/usr/local/bin/aibox-setup        安装 claude / codex / gemini / opencode（第一次使用时调用）
+    rootfs/etc/profile.d/aibox-locale.sh    按出口地区设置时区和语言（读取 ~/.config/aibox/locale.env）
     rootfs/etc/aibox/bashrc                 提示符、欢迎信息
     rootfs/etc/profile.d/aibox-path.sh      登录 shell 的 PATH（/etc/profile 会重置）
     rootfs/etc/tmux.conf                    tmux 配置（鼠标、OSC52 剪贴板）
@@ -42,7 +43,7 @@ tests/                         兼容性测试（tests/run.sh；见第 6 节）
 site/                          宣传站（纯静态，与产品代码无关）
 ```
 
-运行时生成、不进 git 的目录：`config/`（用户配置）、`.aibox/compose.generated.yaml`（挂载与端口）。
+运行时生成、不进 git 的目录：`config/`（用户配置）、`.aibox/compose.generated.yaml`（挂载与端口）、`.aibox/geo.env`（最近一次检测到的出口地区）。
 
 ## 2. `aibox up` 时发生了什么
 
@@ -65,7 +66,8 @@ docker compose -f compose.yaml -f gateways/<网关>.yaml -f .aibox/compose.gener
        依赖 gateway healthy 才启动
   │
 fix_netns（网关重启过则重启 workspace，重新加入网络命名空间）
-missing_tools → aibox-setup（安装 AIBOX_TOOLS 中缺少的工具，流量经网关）
+geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.config/aibox/locale.env）
+（AI 工具不在这里安装：cmd_agent 和容器内的 command_not_found_handle 在第一次使用时安装）
 ```
 
 ## 3. `aibox` 脚本的结构
@@ -82,10 +84,11 @@ missing_tools → aibox-setup（安装 AIBOX_TOOLS 中缺少的工具，流量�
 | 容器状态 | `is_running` `health` `dexec` `fix_netns` | `TTY_FLAG` 必须在顶层判断 |
 | 向导提问 | `ask` `ask_path` `ask_secret` `yesno` `choose` | |
 | **一键导入出口** | `classify_proxy_input` `probe_subscription` `import_proxy` `write_import_upstream` `show_probe_names` | 识别订阅 / 分享链接 / 一键导入链接 / Base64 / YAML，预先下载订阅检查，再写入 upstream.yaml 和 links.txt |
-| **写配置的共用函数** | `write_sub_upstream` `write_nodes_upstream` `install_wireguard` `write_provider_vpn` `check_wg_endpoint` `check_tools` `check_ports` | 向导和非交互命令共用；失败时恢复原文件 |
-| 向导 | `wizard_network` `wizard_mounts` `wizard_tools` `wizard_misc` `cmd_wizard` | |
+| **写配置的共用函数** | `write_sub_upstream` `write_nodes_upstream` `install_wireguard` `write_provider_vpn` `check_wg_endpoint` `check_ports` | 向导和非交互命令共用；失败时恢复原文件 |
+| 出口测试与地区 | `proxy_test` `geo_query` `geo_apply` `geo_args` `country_locale` `cmd_test` `snap_save/restore` | 用临时网关容器 aibox-gwtest 测节点，不影响正在运行的环境；失败时恢复配置 |
+| 向导（3 步） | `wizard_network` `wizard_test` `wizard_mounts` `cmd_wizard` | |
 | 非交互配置 | `cmd_init` `cmd_config` `config_usage` `list_mounts_raw` | 供 agent / 脚本使用，不提问 |
-| 启动与进入 | `cmd_up` `missing_tools` `ensure_up` `resolve_project` `cmd_shell` `cmd_agent` | `cmd_agent` 实现 `ai c` / `ai x` 的 tmux 会话 |
+| 启动与进入 | `cmd_up` `ensure_up` `resolve_project` `cmd_shell` `cmd_agent` | `cmd_agent` 实现 `ai c` / `ai x` 的 tmux 会话 |
 | 管理命令 | `cmd_stop` `cmd_down` `cmd_logs` `cmd_setup` `cmd_rebuild` `cmd_status` `cmd_mounts` `cmd_destroy` `cmd_install` `cmd_completion` `cmd_guide` | |
 | 体检 | `cmd_doctor`（`ok` / `bad` 计数） | `--full` 会模拟断线 |
 | 帮助与分发 | `usage`、文件末尾的 `case "$cmd"` | 简写 `c` `x` `s` `ls` `st` `q` `d` 等在这里 |

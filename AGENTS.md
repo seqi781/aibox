@@ -13,12 +13,12 @@ printf %s "$USER_INPUT" | ./aibox import - [--filter '<正则>']   # 订阅/分�
 #   或 ./aibox config proxy --nodes <Clash YAML 文件>
 #   或 ./aibox config vpn --wireguard <wg0.conf>
 ./aibox mounts add rw <用户指定的项目目录>                 # ro 表示只读
-./aibox config tools claude codex                         # 可选
-./aibox config ports 3000                                 # 可选
 printf %s "$KEY" | ./aibox config key ANTHROPIC_API_KEY   # 可选；密钥只从标准输入传入
 ./aibox config check && ./aibox up && ./aibox doctor --full
 ```
 
+- `aibox import` 会实际测试节点，并输出可用节点、延迟、出口 IP 和地区，把这些结果转告用户；测试不通过时原配置保持不变。
+- 不需要替用户选择 AI 工具、时区、语言、镜像源或端口：工具第一次使用时自动安装，时区和语言按出口 IP 自动设置。
 - 订阅链接、节点、要授权的目录都必须向用户询问，**不要猜，也不要编造**。用户给的订阅或分享链接原样交给 `aibox import -`，不要自己解码、转换或改写。
 - **不要运行交互式命令**：不带参数的 `aibox config`、不带 `--defaults` 的 `aibox init`、`aibox shell`、`aibox claude`、`aibox codex`。配置完成后，告诉用户在自己的终端里运行 `aibox claude <项目>`。
 - 失败时阅读 stderr，处理方法见 `docs/GUIDE.md` 第 3 节的表格。网关问题用 `./aibox logs gateway` 查看（非终端环境下只输出最近 200 行后退出，不会卡住）。
