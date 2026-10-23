@@ -90,7 +90,7 @@ geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.con
 | **写配置的共用函数** | `write_sub_upstream` `write_nodes_upstream` `install_wireguard` `write_provider_vpn` `check_wg_endpoint` `check_ports` | 向导和非交互命令共用；失败时恢复原文件 |
 | 出口测试与地区 | `proxy_test` `geo_query` `geo_apply` `geo_args` `country_locale` `cmd_test` `snap_save/restore` | 用临时网关容器 aibox-gwtest 测节点，不影响正在运行的环境；失败时恢复配置 |
 | 环境检测报告 | `cmd_report` `REPORT_COLLECT` `report_parse` `host_dns_resolver` `ai_unsupported_region` | 出口相关查询在 workspace 里经代理执行（用容器的 jq 解析）；本机部分直连；最后汇总为高 / 中 / 低风险 |
-| 向导（3 步） | `wizard_network` `wizard_test` `wizard_mounts` `cmd_wizard` | |
+| 向导（3 步） | `wizard_network` `wizard_test` `wizard_mounts` `cmd_wizard` | 第 3 步：`find_projects` 找 git 项目，`clean_input_path` 处理拖入的路径，`wizard_add_dir` 先校验再问是否可修改 |
 | 非交互配置 | `cmd_init` `cmd_config` `config_usage` `list_mounts_raw` | 供 agent / 脚本使用，不提问 |
 | 启动与进入 | `cmd_up` `ensure_up` `resolve_project` `cmd_shell` `cmd_agent` | `cmd_agent` 实现 `ai c` / `ai x` 的 tmux 会话 |
 | 管理命令 | `cmd_stop` `cmd_down` `cmd_logs` `cmd_setup` `cmd_rebuild` `cmd_status` `cmd_mounts` `cmd_destroy` `cmd_install` `cmd_completion` `cmd_guide` | |

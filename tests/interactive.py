@@ -16,8 +16,9 @@ failed = 0
 def setup():
     shutil.rmtree(W, ignore_errors=True)
     shutil.copytree('/src', W + '/repo', ignore=shutil.ignore_patterns('config', '.aibox', '.git'))
-    for d in ('home/code/app', 'home/docs'):
+    for d in ('home/code/app/.git', 'home/projects/site/.git', 'home/docs', 'home/My Dir'):
         os.makedirs(f'{W}/{d}')
+    os.utime(f'{W}/home/projects/site/.git', (1e9, 1e9))   # 较旧的项目排在后面
     open(W + '/wg.conf', 'w').write('[Interface]\nPrivateKey = k\nAddress = 10.0.0.2\n[Peer]\n'
                                     'PublicKey = p\nEndpoint = 203.0.113.5:51820\nAllowedIPs = 0.0.0.0/0\n')
 
@@ -103,25 +104,29 @@ print(f'交互式流程（bash {BASH_V}）')
 VL = 'vless://uuid@5.6.7.8:443?type=tcp#日本01'
 TJ = 'trojan://pw@tj.example.com:443?sni=tj.example.com#美国01'
 
-drive('init：粘贴无法识别的内容 → 重新粘贴两条分享链接 → 筛选 → 授权目录', ['init'], [
+drive('init：粘贴无法识别的内容 → 重新粘贴两条分享链接 → 筛选 → 按编号/路径/拖入授权目录', ['init'], [
     (r'请选择 \[1\]: ', '1'),
     (r'最后再按一次回车结束：', 'hello-world\n'),
     (r'重新输入？.*\[Y/n\]: ', ''),
     (r'最后再按一次回车结束：', f'{VL}\n{TJ}\n'),
     (r'节点筛选.*: ', '日本|美国'),
-    (r'添加目录.*: ', '~/code/app'), (r'权限 rw/ro .*: ', ''),
-    (r'添加目录.*: ', W + '/home/docs'), (r'权限 rw/ro .*: ', 'ro'),
-    (r'添加目录.*: ', '~'), (r'权限 rw/ro .*: ', 'rw'),
-    (r'添加目录.*: ', ''),
+    (r'1\) ~/code/app\s+2\) ~/projects/site[\s\S]*编号或路径.*: ', '1 2'),
+    (r'允许 AI 修改 ~/code/app .*\[Y/n\]: ', ''), (r'允许 AI 修改 ~/projects/site .*\[Y/n\]: ', 'n'),
+    (r'继续添加.*: ', f"'{W}/home/docs'"), (r'允许 AI 修改 ~/docs .*: ', 'n'),
+    (r'继续添加.*: ', '~'),
+    (r'不能|拒绝[\s\S]*继续添加.*: ', W + '/home/My\\ Dir '), (r'允许 AI 修改 ~/My Dir .*: ', 'y'),
+    (r'继续添加.*: ', ''),
     (r'安装 aibox 命令.*\[Y/n\]: ', 'n'),
 ])
 check('init 写入 2 条分享链接', conf('mihomo/links.txt').count('://') == 2)
 check('init 写入节点筛选', 'AIBOX_NODE_FILTER=日本|美国' in conf('aibox.env'))
-check('init 授权两个目录（~ 被拒绝）', conf('mounts.conf').count('\nrw') + conf('mounts.conf').count('\nro') == 2)
+m = conf('mounts.conf')
+check('init 授权 4 个目录（~ 被拒绝）', m.count('\nrw') + m.count('\nro') == 4)
+check('init 授权的读写权限正确', 'rw  ~/code/app' in m and 'ro  ~/projects/site' in m and 'ro  ~/docs' in m and 'rw  ~/My Dir' in m)
 check('init 不再询问工具、端口、时区、镜像源', 'AIBOX_TOOLS' not in conf('aibox.env') and 'AIBOX_APT_MIRROR' not in conf('aibox.env'))
 
 drive('config：全部回车使用默认值', ['config'], [
-    (r'请选择 \[5\]: ', ''), (r'保留以上授权？ \[Y/n\]: ', ''), (r'添加目录.*: ', ''),
+    (r'请选择 \[5\]: ', ''), (r'保留以上授权？ \[Y/n\]: ', ''), (r'继续添加.*: ', ''),
     (r'安装 aibox 命令.*: ', 'n'),
 ])
 check('默认值不改变分享链接', conf('mihomo/links.txt').count('://') == 2)
@@ -151,7 +156,7 @@ drive('config network：商业 VPN（OpenVPN）', ['config', 'network'], [
 check('OpenVPN 写入 gluetun.env', 'OPENVPN_USER=user' in conf('gluetun.env'))
 
 drive('config mounts：清空后重新添加', ['config', 'mounts'], [
-    (r'保留以上授权？ \[Y/n\]: ', 'n'), (r'添加目录.*: ', '~/code/app'), (r'权限 rw/ro .*: ', 'ro'), (r'添加目录.*: ', ''),
+    (r'保留以上授权？ \[Y/n\]: ', 'n'), (r'编号或路径.*: ', '~/code/app'), (r'允许 AI 修改.*: ', 'n'), (r'继续添加.*: ', ''),
 ])
 drive('config key：终端里隐藏输入', ['config', 'key', 'OPENAI_API_KEY'], [(r'OPENAI_API_KEY（输入不显示）: ', 'sk-openai')])
 check('隐藏输入的密钥已保存', 'OPENAI_API_KEY=sk-openai' in conf('workspace.env'))

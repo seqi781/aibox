@@ -385,7 +385,7 @@ mounts_add() {  # mounts_add 模式 路径 [容器路径]
   if [ "$target" = "/workspace/$(basename "$host")" ]; then line="$mode  $rel"; else line="$mode  $rel  -> $target"; fi
   echo "$line" >> "$MOUNTS_FILE"
   fix_owner "$MOUNTS_FILE"
-  echo "  已授权: $mode  $host  ->  $target"
+  echo "  ${G}✔${N} 已授权 $(tilde_path "$host")（$(mode_word "$mode")），容器里的位置: $target"
 }
 
 mounts_rm() {  # 按 项目名 / 容器路径 / 宿主机路径 删除
@@ -926,27 +926,100 @@ wizard_network() {
   esac
 }
 
-wizard_mounts() {
-  local existing="" line p mode tgt
+# 用户输入的路径 → 去掉引号和拖入文件夹时的转义（My\ Project）；相对路径按运行 aibox 时的目录解析
+clean_input_path() {
+  local p; p="$(trim "$1")"
+  case "$p" in \'*\') p="${p#\'}"; p="${p%\'}" ;; \"*\") p="${p#\"}"; p="${p%\"}" ;; *) p="$(printf '%s' "$p" | sed 's/\\\(.\)/\1/g')" ;; esac
+  case "$p" in /*|"~"|"~/"*) ;; *) p="$PWD/$p" ;; esac
+  printf '%s' "$p"
+}
+tilde_path() { case "$1" in "$USER_HOME"/*) printf '~/%s' "${1#"$USER_HOME"/}" ;; *) printf '%s' "$1" ;; esac; }
+
+# 在常见的代码目录里找 git 项目（最近修改的在前，最多 9 个；跳过已授权和不允许授权的）。
+# 不扫描"文稿/桌面/下载"：在 macOS 上读取它们会弹出隐私授权窗口
+find_projects() {
+  local r d done_list="|" line h n=0 gits=()
   if [ -f "$MOUNTS_FILE" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do parse_mount_line "$line" && existing="$existing    $M_MODE  $M_HOST  ->  $M_TARGET
+    while IFS= read -r line || [ -n "$line" ]; do
+      parse_mount_line "$line" || continue
+      h="$(canon_host_path "$M_HOST" 2>/dev/null)" && done_list="$done_list$h|"
+    done < "$MOUNTS_FILE"
+  fi
+  for r in code Code projects Projects dev Dev Developer src workspace Workspace repos git github GitHub work; do
+    [ -d "$USER_HOME/$r" ] || continue
+    while IFS= read -r d; do [ -n "$d" ] && gits+=("$d"); done <<EOF2
+$(find "$USER_HOME/$r" -maxdepth 3 \( -name node_modules -o -name .venv -o -name vendor \) -prune -o -type d -name .git -print 2>/dev/null)
+EOF2
+  done
+  [ "${#gits[@]}" -gt 0 ] || return 0
+  # .git 目录的修改时间 ≈ 最近一次提交/切换分支的时间
+  ls -1dt "${gits[@]}" 2>/dev/null | while IFS= read -r d; do
+    h="$(canon_host_path "${d%/.git}" 2>/dev/null)" || continue
+    case "$done_list" in *"|$h|"*) continue ;; esac
+    printf '%s\n' "$h"; n=$((n + 1)); [ "$n" -lt 9 ] || break
+  done
+}
+
+# 授权一个文件夹：先检查路径，再问是否允许修改
+wizard_add_dir() {
+  local host
+  if ! host="$(canon_host_path "$1" 2>&1)"; then echo "  ${Y}${host}${N}"; return 1; fi
+  [ -d "$host" ] || { echo "  ${Y}请选择文件夹，而不是文件: ${host}${N}"; return 1; }
+  if yesno "允许 AI 修改 $(tilde_path "$host") 里的文件吗？（n = 只读，AI 只能查看）" y; then
+    mounts_add rw "$host" || true
+  else
+    mounts_add ro "$host" || true
+  fi
+}
+
+wizard_mounts() {
+  local existing="" line p i n cands=() added=0
+  if [ -f "$MOUNTS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do parse_mount_line "$line" && existing="$existing    $(mode_word "$M_MODE")  $M_HOST
 "; done < "$MOUNTS_FILE"
   fi
-  echo "  只有授权的目录会出现在容器中（/workspace/<名字>），其余文件对容器完全不可见。"
-  echo "  rw = 读写（AI 可以修改）  ro = 只读（内核强制，AI 无法修改）"
+  echo "  选择要交给 AI 的项目文件夹。AI ${B}只能看到这里选的文件夹${N}，电脑上的其它文件对它完全不可见。"
+  echo "  ${D}通常选具体的代码项目（如 ~/code/myapp），不能选整个主目录。以后也可以用 aibox mounts add <文件夹> 添加。${N}"
   if [ -n "$existing" ]; then
     echo "  已授权:"; printf '%s' "$existing"
     if ! yesno "保留以上授权？" y; then
       grep -E '^[[:space:]]*(#|$)' "$MOUNTS_FILE" > "$MOUNTS_FILE.tmp.$$" || true; mv "$MOUNTS_FILE.tmp.$$" "$MOUNTS_FILE"
+      existing=""
     fi
   fi
+  while IFS= read -r line; do [ -n "$line" ] && cands+=("$line"); done <<EOF2
+$(find_projects)
+EOF2
+  if [ "${#cands[@]}" -gt 0 ]; then
+    echo; echo "  在你的电脑上找到这些项目（最近修改的在前）:"
+    i=1; for p in "${cands[@]}"; do printf '   %s%d)%s %s\n' "$B" "$i" "$N" "$(tilde_path "$p")"; i=$((i + 1)); done
+    echo "  ${D}输入编号（可多个，如 1 3），或输入文件夹路径（可把文件夹拖进这个窗口，支持 Tab 补全）${N}"
+  else
+    echo; echo "  ${D}输入项目文件夹的路径，如 ~/code/myapp（可把文件夹拖进这个窗口，支持 Tab 补全）${N}"
+  fi
   while :; do
-    ask_path p "添加目录（Tab 补全，直接回车结束）"
+    if [ "$added" = 1 ] || [ -n "$existing" ]; then
+      ask_path p "继续添加（直接回车结束）"
+    else
+      ask_path p "编号或路径（直接回车跳过）"
+    fi
     [ -n "$p" ] || break
-    ask mode "权限 rw/ro" rw
-    case "$mode" in rw|ro) ;; *) echo "  请输入 rw 或 ro"; continue ;; esac
-    mounts_add "$mode" "$p" || true
+    case "$p" in
+      *[!0-9\ ,]*)   # 路径
+        wizard_add_dir "$(clean_input_path "$p")" && added=1 ;;
+      *)             # 编号
+        for n in $(printf '%s' "$p" | tr ',' ' '); do
+          if [ "$n" -ge 1 ] && [ "$n" -le "${#cands[@]}" ]; then
+            wizard_add_dir "${cands[$((n - 1))]}" && added=1
+          else
+            echo "  ${Y}没有编号 ${n}${N}"
+          fi
+        done ;;
+    esac
   done
+  if [ "$added" = 0 ] && [ -z "$existing" ]; then
+    echo "  ${Y}没有授权任何文件夹：AI 在容器里看不到你的项目。${N}之后运行 ${B}aibox mounts add ~/code/myapp${N} 再 ${B}aibox up${N} 即可"
+  fi
   if selinux_enforcing; then
     echo "  检测到 SELinux（Enforcing）：挂载目录需要重新打标签（:z）容器才能访问"
     if yesno "允许 aibox 为授权目录设置 SELinux 共享标签？" y; then set_kv "$ENV_FILE" AIBOX_SELINUX_RELABEL 1; else set_kv "$ENV_FILE" AIBOX_SELINUX_RELABEL 0; fi
@@ -986,7 +1059,7 @@ cmd_wizard() {
     start=no
   fi
   step 2 "网络出口";   until wizard_network; do echo "  ${Y}未保存，请重新选择${N}"; done
-  step 3 "授权目录";   wizard_mounts
+  step 3 "选择项目文件夹"; wizard_mounts
   fix_owner "$CONF"
   wizard_summary
   if [ "$HOST_OS" != windows ] && ! command -v aibox >/dev/null 2>&1; then
@@ -1178,6 +1251,8 @@ ${B}aibox config${N} — 配置（不带参数 = 交互式向导；带参数 = �
 修改后执行 ${B}aibox up${N} 生效。
 USAGE
 }
+
+mode_word() { [ "$1" = ro ] && echo "只读" || echo "可修改"; }
 
 list_mounts_raw() {
   local line any=0
