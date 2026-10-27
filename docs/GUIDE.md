@@ -2,7 +2,7 @@
 
 在终端里随时运行 `aibox guide` 查看本文。
 
-- **第一部分（第 1–4 节）给人看**：只需要记住 10 个命令。
+- **第一部分（第 1–4 节）给人看**：日常使用和本机对比。
 - **第二部分（第 5–8 节）给 AI agent 和脚本看**：非交互配置流程和完整命令参考，人不需要读。仓库根目录的 `AGENTS.md` / `CLAUDE.md` 会被 agent 自动读取。
 
 ---
@@ -41,9 +41,28 @@ cd ~/aibox
 | `aibox stop` | 停止（数据保留） |
 | `aibox restart` | 重启；修改配置后用它让配置生效 |
 | `aibox doctor` | 检查网络、断网保护和环境风险 |
+| `aibox compare` | 对比本机和 aibox，看看哪些信息暴露得更少、哪些仍然可见 |
 | `aibox config` | 修改配置（网络出口、项目文件夹） |
 
 只输入 `aibox` 会显示这张表。
+
+**想知道 aibox 实际遮住了什么：** 运行 `aibox compare`。它读取当前终端和正在运行的 aibox，比较 IP、电脑名称、机器标识、硬件目录、用户编号、实际开放的文件及权限。它不读取 Claude 账号、密钥或使用记录，不会启动或重启容器，也不会替你判断封号概率。
+
+- 默认向 `api.ipify.org` / `api6.ipify.org` 查询两边的上网 IP，检测网站会看到各自的来源 IP。本机已经开代理时，查到的是当前代理出口，未必是真实宽带 IP。
+- 默认输出紧凑表格：本机和 aibox 并排显示实际 IP、电脑名、系统、CPU、内存和读写数量，用 `✓`、`⚠`、`—` 标记差异、仍可见和未验证。机器 ID、开机 ID 只显示前 8 位。
+- `aibox compare --offline` 跳过联网查询；截图分享时用 `--redact` 隐藏 IP、电脑名和 ID；`--json` 保持脱敏的结构化结果。
+- 原始数据只在本机比较和显示，不自动保存，也不传入另一边。终端内容和手动重定向的文件可能包含实际 IP，公开前请检查。
+- 本机一列按当前终端能访问的范围说明；Claude 自己的授权规则可能进一步限制访问。可读取不代表已读取或上传。
+- 未运行、读取失败或查询失败会注明“未验证”，检测不完整返回 2；完成返回 0（包含主动跳过的查询）。返回 0 不代表没有暴露项，具体看报告。
+- 普通对比不模拟断线，也不检查节点信誉；网关健康不代表断线阻断已验证。需要模拟断线时使用 `aibox doctor --full`。
+
+<a id="hardware-privacy"></a>
+
+**关于电脑信息防护：** 新环境默认遮住 `/sys` 硬件目录，并在独立的 home 中生成机器标识。更新后要重新构建并重建 workspace 才会生效，`aibox compare` 会检查实际运行的容器，旧容器不会被当成已经更新。重新构建会中断该容器中的任务，请先保存工作。
+
+GPU、设备发现、部分硬件监控及依赖 `/sys` 的工具可能受影响。这类项目可在 `config/aibox.env` 中设置 `AIBOX_HIDE_HARDWARE=0`，再重建工作容器；对比会显示防护关闭后的暴露项。普通代码编辑、Node、Python、Git 的验证不代表所有开发工具都兼容。
+
+这不会改写 CPU 指令、内核返回值、共享开机标识或 Claude 自身的数据收集，也不能保证工具不知道自己在容器里。Linux 容器可能与本机使用同一个内核；macOS / WSL2 使用 Docker 所在的 Linux 环境。共享项目的文件、Git 记录、挂载信息和相同的登录账号仍可能关联身份。
 
 **怎么指定项目：** 先在终端里 `cd` 到项目文件夹，再运行命令，就会进入容器里对应的位置，例如 `~/code/myapp/src` → `/workspace/myapp/src`。不在项目文件夹里时，可以在命令后面写项目名：`aibox claude myapp`。
 
@@ -94,7 +113,7 @@ cd ~/aibox
 - 所有配置命令都不提问、不需要终端。成功返回 0，失败返回非 0，错误原因输出到 stderr。
 - 写入失败（例如节点不合规）时，**原配置保持不变**，可以放心重试。
 - 不要运行需要交互的命令：不带参数的 `aibox config`、不带 `--defaults` 的 `aibox init`、`aibox shell`、`aibox tmux`、`aibox claude`、`aibox codex`。它们是给人在终端里用的。
-- 向用户转述时只提第 2 节的 10 个命令；其它命令由你来运行。
+- 向用户转述时只提第 2 节的常用命令（包括用户明确要求的 `compare`）；其它命令由你来运行。
 
 **标准流程：**
 
@@ -192,6 +211,7 @@ printf %s "$LINKS" | aibox import -                 # 从标准输入读取（�
 | `aibox up` | 启动（首次构建镜像，约 3–5 分钟） |
 | `aibox test` | 重新测试当前代理：可用节点、延迟、出口 IP、地区 |
 | `aibox report` | 只输出环境检测报告（`aibox doctor` 末尾也会输出） |
+| `aibox compare [--offline] [--redact] [--json]` | 本机与容器的实际数据对比表；`--redact` 隐藏 IP 等信息，`--json` 保持脱敏。返回 2 表示检测不完整 |
 | `aibox doctor [--full]` | 网络与挂载体检；`--full` 含断线阻断测试。设置 `AIBOX_DOCTOR_NO_REPORT=1` 时不附带报告 |
 | `aibox exec <命令>` | 在容器里执行一条命令（按当前目录定位） |
 | `aibox claude\|codex [项目] --yolo` | 跳过工具自身的逐条确认（Claude 的 `--dangerously-skip-permissions`，Codex 的 `--dangerously-bypass-approvals-and-sandbox`） |

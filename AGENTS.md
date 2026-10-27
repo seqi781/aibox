@@ -22,7 +22,8 @@ printf %s "$KEY" | ./aibox config key ANTHROPIC_API_KEY   # 可选；密钥只�
 - 不需要替用户选择 AI 工具、时区、语言、镜像源或端口：工具第一次使用时自动安装，时区和语言按出口 IP 自动设置。
 - 订阅链接、节点、要授权的目录都必须向用户询问，**不要猜，也不要编造**。用户给的订阅或分享链接原样交给 `aibox import -`，不要自己解码、转换或改写。
 - **不要运行交互式命令**：不带参数的 `aibox config`、不带 `--defaults` 的 `aibox init`、`aibox shell`、`aibox tmux`、`aibox claude`、`aibox codex`。配置完成后，告诉用户在自己的终端里 `cd` 到项目文件夹运行 `aibox claude`。
-- **给用户的说明只提这 10 个命令**：`aibox init / claude / codex / shell / tmux / status / stop / restart / doctor / config`。其它命令（`import`、`mounts`、`report`、`up`、`logs` 等，完整列表见 `aibox help --all`）由你来运行，不要让用户去学。
+- **给用户的说明只提这些常用命令**：`aibox init / claude / codex / shell / tmux / status / stop / restart / doctor / compare / config`（`compare` 为用户要求新增）。其它命令（`import`、`mounts`、`report`、`up`、`logs` 等，完整列表见 `aibox help --all`）由你来运行，不要让用户去学。
+- `aibox compare` 只读比较本机和正在运行的容器；不启动、不重建，不读取工具凭据。默认用紧凑表格显示真实 IP、电脑名和系统参数，ID 只显示前 8 位；分享截图用 `--redact`，`--json` 保持脱敏。`--offline` 不查询第三方 IP 网站。未验证项不当成通过，不能据此给出封号概率或“工具识别不出容器”的承诺。
 - 失败时阅读 stderr，处理方法见 `docs/GUIDE.md` 第 5 节的表格。网关问题用 `./aibox logs gateway` 查看（非终端环境下只输出最近 200 行后退出，不会卡住）。
 - 不要把密钥写进命令参数、提交记录或聊天回复中。
 

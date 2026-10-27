@@ -187,6 +187,8 @@ load_env() {
     export "$key=$val"
   done < "$ENV_FILE"
   export AIBOX_GATEWAY="${AIBOX_GATEWAY:-mihomo}"
+  export AIBOX_HIDE_HARDWARE="${AIBOX_HIDE_HARDWARE:-1}"
+  case "$AIBOX_HIDE_HARDWARE" in 0|1) ;; *) die "AIBOX_HIDE_HARDWARE 只能是 0 或 1" ;; esac
   [ -f "$ROOT/gateways/$AIBOX_GATEWAY.yaml" ] || die "未知网关 AIBOX_GATEWAY=${AIBOX_GATEWAY}（可选: mihomo, gluetun）"
   if [ "$AIBOX_GATEWAY" = gluetun ] && [ ! -f "$CONF/gluetun.env" ]; then die "缺少 config/gluetun.env（运行 aibox config 重新配置）"; fi
   if [ -n "${AIBOX_UPSTREAM_PROXY:-}" ]; then
@@ -330,7 +332,8 @@ gen_override() {
         read_only: $([ "$M_MODE" = ro ] && echo true || echo false)
         bind: $bindopt
 "
-      summary="$summary$M_MODE $host -> $M_TARGET;"
+      # 容器只需要容器内的位置；不要把本机用户名和完整路径传进去。
+      summary="$summary$M_MODE $M_TARGET;"
       MOUNT_LIST="$MOUNT_LIST$M_MODE	$host	$M_TARGET
 "
     done < "$MOUNTS_FILE"
@@ -362,6 +365,10 @@ gen_override() {
     echo "  workspace:"
     echo "    environment:"
     echo "      AIBOX_MOUNTS: $(yq "$summary")"
+    if [ "${AIBOX_HIDE_HARDWARE:-1}" = 1 ]; then
+      echo "    tmpfs:"
+      echo "      - /sys:ro,nosuid,nodev,noexec,size=65536"
+    fi
     [ -z "$vols" ] || { echo "    volumes:"; printf '%s' "$vols"; }
     if [ -n "$ports$gwvols" ]; then
       echo "  gateway:"
@@ -1225,6 +1232,7 @@ cmd_config() {
         AIBOX_ALLOW_BROAD_MOUNT) die "AIBOX_ALLOW_BROAD_MOUNT 只能由用户手动写入 config/aibox.env" ;;
         AIBOX_PORTS) check_ports "${2:-}" || exit 1 ;;
         AIBOX_GATEWAY) case "${2:-}" in mihomo|gluetun) ;; *) die "AIBOX_GATEWAY 只能是 mihomo 或 gluetun" ;; esac ;;
+        AIBOX_HIDE_HARDWARE) case "${2:-}" in 0|1) ;; *) die "AIBOX_HIDE_HARDWARE 只能是 0 或 1" ;; esac ;;
       esac
       copy_examples >/dev/null; set_kv "$ENV_FILE" "$1" "${2:-}"; fix_owner "$ENV_FILE"
       echo "已设置 $1=${2:-}（aibox up 生效）" ;;
@@ -1642,7 +1650,7 @@ cmd_install() {
 }
 
 cmd_completion() {
-  local cmds="init claude codex shell tmux status stop restart doctor config help"
+  local cmds="init claude codex shell tmux status stop restart doctor compare config help"
   case "${1:-bash}" in
     zsh) cat <<EOF
 # macOS 自带的 zsh 默认没有启用补全系统；没有 compdef 时先初始化
@@ -1986,6 +1994,9 @@ cmd_report() {
   echo "  ${D}判定针对 AI 服务的风控（验证码、限制、封号）风险，仅供参考${N}"
 }
 
+# compare 的探测与判定独立于启动流程，不会自动启动、重建或更改正在运行的环境。
+. "$ROOT/lib/compare.sh"
+
 usage() {
   cat <<EOF
 ${B}aibox${N} — 在 Docker 里运行 Claude Code / Codex，网络只走你配置的代理或 VPN
@@ -1998,6 +2009,7 @@ ${B}aibox${N} — 在 Docker 里运行 Claude Code / Codex，网络只走你配�
   ${B}aibox status${N}            查看运行状态和出口 IP
   ${B}aibox stop${N} / ${B}restart${N}    停止 / 重启（修改配置后用 restart 生效）
   ${B}aibox doctor${N}            检查网络、断网保护和环境风险
+  ${B}aibox compare${N}           对比直接使用与 aibox 的信息暴露情况
   ${B}aibox config${N}            修改配置（网络出口、项目文件夹）
 
 不写项目名时，先在终端里 cd 到项目文件夹再运行。
@@ -2034,6 +2046,7 @@ ${B}日常${N}
   sessions              列出 --tmux 会话
   exec <命令...>        在容器中执行一条命令
   status                状态、出口 IP、会话
+  compare [--offline] [--redact] [--json]  本机与 aibox 的实际数据对比表
   stop | restart        停止 / 重启（数据保留）
 
 ${B}管理${N}
@@ -2066,6 +2079,7 @@ case "$cmd" in
   status) cmd_status ;;
   doctor) cmd_doctor "$@" ;;
   report) cmd_report ;;
+  compare) cmd_compare "$@" ;;
   mounts) cmd_mounts "$@" ;;
   projects) list_projects ;;
   logs) cmd_logs "$@" ;;

@@ -4,6 +4,16 @@ if [ "$(stat -c %u "$HOME")" != "$(id -u)" ]; then
   sudo chown -R "$(id -u):$(id -g)" "$HOME"
 fi
 mkdir -p "$HOME/.npm-global" "$HOME/.local/bin"
+# 为这个 home 卷生成独立、稳定的机器标识；不复制宿主机标识。
+# 不在 ~/.config 中随意找其它应用的 ID，也不改动 Claude 的登录数据。
+identity_dir="$HOME/.config/aibox"
+mkdir -p "$identity_dir"
+chmod 700 "$identity_dir"
+if ! grep -qxE '[0-9a-f]{32}' "$identity_dir/machine-id" 2>/dev/null; then
+  (umask 077; python3 -c 'import secrets; print(secrets.token_hex(16))' > "$identity_dir/machine-id") || exit 1
+fi
+chmod 600 "$identity_dir/machine-id"
+sudo install -m 444 "$identity_dir/machine-id" /etc/machine-id || exit 1
 # ~/.bashrc（来自 /etc/skel）会把提示符改回 Debian 默认样式；在它最后加载 aibox 的提示符
 if ! grep -q '/etc/aibox/prompt.sh' "$HOME/.bashrc" 2>/dev/null; then
   printf '\n# aibox 提示符（保持在最后）\n[ -f /etc/aibox/prompt.sh ] && . /etc/aibox/prompt.sh\n' >> "$HOME/.bashrc"

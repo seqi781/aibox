@@ -37,6 +37,10 @@ RUN set -eux; \
 
 COPY rootfs/ /
 RUN chmod +x /usr/local/bin/aibox-* /usr/local/lib/aibox/tool-shim; \
+    mkdir -p /var/lib/dbus; \
+    rm -f /etc/machine-id /var/lib/dbus/machine-id; \
+    touch /etc/machine-id; \
+    ln -s /etc/machine-id /var/lib/dbus/machine-id; \
     for t in claude codex gemini opencode; do ln -sf /usr/local/lib/aibox/tool-shim "/usr/local/bin/$t"; done; \
     echo '[ -f /etc/aibox/bashrc ] && . /etc/aibox/bashrc' >> /etc/bash.bashrc
 

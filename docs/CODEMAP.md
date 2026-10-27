@@ -7,6 +7,11 @@
 
 ```
 aibox                          唯一的命令行入口（bash 3.2 兼容）
+lib/
+  compare.sh                   本机与容器的信息暴露对比（bash 3.2；只读、不调用启动流程）
+  compare-display.sh           紧凑实际数据表；--redact 隐藏 IP、电脑名与 ID
+  compare-table.awk            UTF-8 中文列宽、对齐与安全截断（不依赖 Python）
+  environment-probe.sh         两端共用的只读探针（POSIX sh；原始标识只供宿主机内存比较）
 compose.yaml                   workspace 容器（无网卡，共享网关的网络命名空间）
 gateways/
   mihomo.yaml                  代理网关的 compose 片段
@@ -21,7 +26,7 @@ images/
     healthcheck.sh             TUN 存在 + 组内有真实节点 + 能经代理上网
   workspace/                   工作容器镜像（Debian 13 + Node 24 + 开发工具）
     Dockerfile
-    rootfs/usr/local/bin/aibox-entrypoint   修正 home 卷归属
+    rootfs/usr/local/bin/aibox-entrypoint   修正 home 卷归属，生成独立且随 home 保留的机器标识
     rootfs/usr/local/bin/aibox-setup        安装 claude / codex / gemini / opencode（第一次使用时调用）
     rootfs/usr/local/lib/aibox/tool-shim    /usr/local/bin/{claude,codex,...} 指向它：首次运行时安装，然后 exec 成真正的程序
     rootfs/etc/aibox/prompt.sh              [aibox] 提示符（~/.bashrc 末尾也会加载，避免被覆盖）
@@ -91,12 +96,13 @@ geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.con
 | **写配置的共用函数** | `write_sub_upstream` `write_nodes_upstream` `install_wireguard` `write_provider_vpn` `check_wg_endpoint` `check_ports` | 向导和非交互命令共用；失败时恢复原文件 |
 | 出口测试与地区 | `proxy_test` `geo_query` `geo_apply` `geo_args` `country_locale` `cmd_test` `snap_save/restore` | 用临时网关容器 aibox-gwtest 测节点，不影响正在运行的环境；失败时恢复配置 |
 | 环境检测报告 | `cmd_report` `REPORT_COLLECT` `report_parse` `host_dns_resolver` `ai_unsupported_region` | 出口相关查询在 workspace 里经代理执行（用容器的 jq 解析）；本机部分直连；最后汇总为高 / 中 / 低风险 |
+| 信息暴露对比 | `lib/compare.sh` 的 `cmd_compare`，`lib/environment-probe.sh` | 只检查实际运行环境；默认实际数据表，--redact / --json 脱敏；不落盘、不传入对方环境；未知不当成通过 |
 | 向导（3 步） | `wizard_network` `wizard_test` `wizard_mounts` `cmd_wizard` | 第 3 步：`find_projects` 找 git 项目，`clean_input_path` 处理拖入的路径，`wizard_add_dir` 先校验再问是否可修改 |
 | 非交互配置 | `cmd_init` `cmd_config` `config_usage` `list_mounts_raw` | 供 agent / 脚本使用，不提问 |
 | 启动与进入 | `cmd_up` `ensure_up` `resolve_project` `cmd_shell` `cmd_tmux` `cmd_agent` | `cmd_tmux`：每个项目一个可恢复的 tmux 会话；`cmd_agent` 启动 claude / codex（`--tmux` 时放进"工具 + 项目"会话） |
 | 管理命令 | `cmd_stop` `cmd_down` `cmd_logs` `cmd_setup` `cmd_rebuild` `cmd_status` `cmd_mounts` `cmd_destroy` `cmd_install` `cmd_completion` `cmd_guide` | |
 | 体检 | `cmd_doctor`（`ok` / `bad` 计数） | `--full` 会模拟断线 |
-| 帮助与分发 | `usage`（给人看的 10 个命令）、`usage_all`（`help --all`，给 agent）、文件末尾的 `case "$cmd"` | 没有简写命令；给人看的命令只加到 `usage`、README 和 GUIDE 第一部分，其它命令只写进 `usage_all` 和 GUIDE 第二部分 |
+| 帮助与分发 | `usage`（常用命令，含用户要求的 compare）、`usage_all`（`help --all`，给 agent）、文件末尾的 `case "$cmd"` | 没有简写命令；给人看的命令加到 `usage`、补全、README 和 GUIDE 第一部分，其它命令只写进 `usage_all` 和 GUIDE 第二部分 |
 
 ## 4. 安全相关的关键位置
 
@@ -110,6 +116,8 @@ geo_apply（经隧道查询出口 IP 的地区 → 生成 locale，写入 ~/.con
 | 控制接口不对 workspace 开放 | `config-head.yaml` 的 `external-controller-unix` |
 | workspace 无网络权限 | `compose.yaml` 的 `network_mode` 和 `cap_drop` |
 | 挂载限制 | `aibox` 的 `canon_host_path` 和 `mount_guard` |
+| 硬件信息目录遮挡 | `aibox` 的 `gen_override`（只读 tmpfs），`load_env` / `cmd_config` 校验 `AIBOX_HIDE_HARDWARE` |
+| 独立机器标识 | workspace 的 `aibox-entrypoint` 与 Dockerfile；不改变 AI 工具登录标识 |
 | 分享链接的服务器地址检查 | `validate-upstream.sh --links`（`link_host` 解析各协议的地址；CLI 和网关启动时都会执行） |
 | WireGuard 服务器地址检查 | `aibox` 的 `check_wg_endpoint`（调用 `validate-upstream.sh --server`） |
 
@@ -146,6 +154,8 @@ tests/run.sh             # 另外在 bash 3.2 / 4.4 / 5.2 下跑全部非交互�
 | `tests/lint.sh` | 语法、bash 4+ 专有语法、变量紧跟中文、在 `$(...)` 里判断终端、GNU 专有选项 |
 | `tests/validator.sh` | 严格出口校验器：YAML 样例、各协议分享链接的地址解析、订阅内容概括、`--server` |
 | `tests/cli.sh` | 约 100 条非交互命令的返回码、输出和生成的文件 |
+| `tests/compare.py` | 对比的脱敏、只读、失败/旧环境、实际权限与挂载判定；由 cli.sh 在各 bash 版本下执行 |
+| `tests/workspace-privacy.sh` | 用独立测试镜像、无网络临时容器验证 sysfs 遮挡、机器标识稳定性及 Node/Python/Git/tmux/C 兼容；不使用真实项目或 home |
 | `tests/interactive.py` | 用伪终端驱动向导各分支和 `install` |
 | `tests/Dockerfile` | 测试镜像：指定版本的 bash，并换成非 GNU 的 awk / sed / grep，接近 macOS |
 

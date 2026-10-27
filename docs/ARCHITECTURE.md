@@ -112,6 +112,20 @@ gluetun 自带 kill switch（iptables 只放行到 VPN 服务器的连接）、D
 - 时区和语言跟随出口 IP 的地区：`aibox up` 在 workspace 里经隧道查询 ipinfo.io（备用 ip-api.com），生成对应 locale，写入 `~/.config/aibox/locale.env`，由登录 shell 和 `aibox` 的 `docker exec -e` 生效。不写进容器环境变量，地区变化时不需要重建容器（不会中断 tmux 会话）。
 - apt 安装的包写进 `AIBOX_EXTRA_PACKAGES`，执行 `rebuild` 后会固化到镜像里。
 
+### 5.1 机器信息防护与实测对比
+
+- `AIBOX_HIDE_HARDWARE=1`（默认，旧配置未写此项时也启用）：生成的 workspace 配置用只读空 tmpfs 遮住 `/sys`，减少 DMI / 设备编号和硬件拓扑的读取。它不会改变 `/proc/cpuinfo`、内核系统调用或 CPU 指令。`/proc/sys/kernel/random/boot_id` 仍可能暴露 Docker 所用 Linux 的开机标识；本次实测的 Docker/runc 拒绝在该路径挂载 tmpfs 或空文件，未绕过该限制。
+- workspace 启动时用系统随机源生成 32 位十六进制 machine ID，保存在独立 home 的 `~/.config/aibox/machine-id`，然后安装到 `/etc/machine-id`；D-Bus 的同名文件引用它。保留 home 时标识稳定，不复制宿主机 ID，也不更改 AI 工具的账号标识。
+- 电脑名使用 Docker 默认的容器名称标识，不沿用宿主机名。共享网关网络时 Docker 不支持设置 `hostname`，因此不额外伪造电脑名或绕过网络限制。
+- `AIBOX_MOUNTS` 只包含容器内路径和读写方式。宿主机 bind 源路径只用于宿主机侧编排；容器自己的 mountinfo 仍可能暴露源路径，不能宣称删除环境变量就消除了路径关联。
+- `aibox compare` 对宿主机和已运行容器执行同一只读探针。默认终端表格显示实际 IP、电脑名和系统参数，唯一 ID 只显示前 8 位；`--redact` 隐藏 IP / 电脑名 / ID，`--json` 保持脱敏。宿主机数据不传进容器，也不自动写报告文件。实际容器的挂载、权限和 tmpfs 与探针结果一起判定，未检测到、失败、未运行均不视为防护通过。它不调用启动流程，不中断已有任务。
+- 默认联网步骤只向 `api.ipify.org` / `api6.ipify.org` 查询两端当前出口；`--offline` 跳过它们。它不会强行绕过宿主机已有代理寻找真实宽带 IP，也不读取 Claude 的凭据或联网请求工具服务。IP 相同不直接推断直连，IPv6 请求失败不直接推断阻断成功。
+- 对比的是当前终端可访问的信息，不是 Claude 已采集或上传的内容；也不模拟平台风控。账号关联、浏览器登录网络、CPU 架构、可见内核和部分资源信息仍存在。Docker 使用共享内核的隔离机制，不能保证程序无法识别容器或无法用其它途径关联设备。
+
+兼容性代价：需要 sysfs 的 GPU、设备发现、硬件监控和部分构建工具可能受影响，可设置 `AIBOX_HIDE_HARDWARE=0` 后重建 workspace；更改不要求扩大 capabilities，也不修改网关防火墙。已有工作容器必须在保存任务后重建才能应用，更新代码不代表正在运行的旧容器已受保护。
+
+参考：[Docker 隔离机制](https://docs.docker.com/engine/security/)、[共享容器网络的限制](https://docs.docker.com/engine/network/#container-networks)、[Linux UTS 命名空间只隔离电脑名和域名](https://man7.org/linux/man-pages/man7/uts_namespaces.7.html)。
+
 ## 6. 跨平台
 
 | 平台 | 状态 | 说明 |

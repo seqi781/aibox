@@ -34,6 +34,7 @@ run 0 ./aibox help
 run 0 ./aibox
 run 0 ./aibox help --all
 expect "aibox 只列出给人用的命令" sh -c './aibox | grep -q "aibox tmux" && ! ./aibox | grep -qE "import|report|mounts"'
+expect "帮助列出 compare" sh -c './aibox help | grep -q "aibox compare"'
 expect "help --all 列出全部命令" sh -c './aibox help --all | grep -q "import" && ./aibox help --all | grep -q "report"'
 run 1 ./aibox no-such-cmd
 run 1 ./aibox c
@@ -118,6 +119,17 @@ run 0 ./aibox config set AIBOX_TZ Asia/Shanghai
 run 1 ./aibox config set AIBOX_ALLOW_BROAD_MOUNT 1
 run 1 ./aibox config set AIBOX_UPSTREAM_PROXY x
 run 1 ./aibox config set AIBOX_GATEWAY bogus
+run 0 ./aibox config set AIBOX_HIDE_HARDWARE 1
+cp config/aibox.env "$W/env.before-hardware"
+run 1 ./aibox config set AIBOX_HIDE_HARDWARE yes
+expect "硬件设置无效时不改变配置" cmp -s config/aibox.env "$W/env.before-hardware"
+run 0 ./aibox config check
+expect "默认遮住硬件目录" grep -q '/sys:ro,nosuid,nodev,noexec' .aibox/compose.generated.yaml
+expect "环境提示不传入本机路径" sh -c 'grep AIBOX_MOUNTS .aibox/compose.generated.yaml | grep -qv " -> "'
+run 0 ./aibox config set AIBOX_HIDE_HARDWARE 0
+run 0 ./aibox config check
+expect "关闭防护时不生成遮挡" sh -c '! grep -q "tmpfs:" .aibox/compose.generated.yaml'
+run 0 ./aibox config set AIBOX_HIDE_HARDWARE 1
 run 1 ./aibox config set FOO bar
 run 0 ./aibox config get AIBOX_TZ
 run 0 ./aibox config show
@@ -154,6 +166,9 @@ run 0 zsh -f -c 'eval "$(./aibox completion zsh)" && whence -w _aibox'
 run 1 ./aibox config
 run 1 ./aibox config network
 run 1 ./aibox config mounts
+
+# ---------- 信息暴露对比（固定两端结果；不需要 Docker 守护进程或真实网络） ----------
+expect "compare 的场景断言通过" python3 tests/compare.py
 
 # ---------- install（非终端：不提问） ----------
 run 0 env PATH="$HOME/.local/bin:/usr/bin:/bin" ./aibox install

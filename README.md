@@ -1,102 +1,248 @@
 # aibox
 
-**为 Claude Code 等 AI 编程工具提供独立网络出口与宿主机隔离的 Docker 终端。** 支持 **macOS 和 Linux**，Windows 可在 WSL2 中使用。
+<div align="center">
+  <h3>Claude Code 用独立网络，只打开你允许的项目。</h3>
+  <p>在自己的终端里写代码，其他应用照常上网。</p>
+  <p>
+    <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20WSL2-orange" alt="macOS、Linux、WSL2" />
+    <img src="https://img.shields.io/badge/Docker-Required-2496ED?logo=docker&amp;logoColor=white" alt="需要 Docker" />
+  </p>
+  <p><a href="#quick-start">快速开始</a> · <a href="#demo">完整演示</a> · <a href="#compare">本机对比</a> · <a href="#faq">常见问题</a> · <a href="docs/GUIDE.md">使用指南</a></p>
+</div>
 
-![aibox init 配置向导与 aibox claude 启动实录](docs/media/aibox-init-claude.gif)
+你照常用现在的终端。aibox 把 **Claude Code / Codex** 放在单独的 Docker 环境里，上网用你选的远程节点，本机文件只开放你选中的项目文件夹。
 
-[下载完整视频 · 1080p MP4](https://github.com/seqi781/aibox/raw/refs/heads/main/docs/media/aibox-init-claude.mp4) · [宣传封面与全部素材](docs/media/README.md)
+## 为什么用 aibox？
 
-演示只输入两个命令：`aibox init` 打开配置向导，选择网络出口、粘贴节点、选择项目和读写权限，确认启动；接着运行 `aibox claude`，自动安装并打开 Claude Code。录制停在首次登录入口，节点输入隐藏、公网 IP 已脱敏、等待时间已压缩。
+| 你关心的事 | aibox 怎么做 |
+|---|---|
+| AI 要走节点，其他应用照常用 | 只接管 aibox 里的网络，不改其他软件的网络设置 |
+| 节点掉线，担心改走直连 | 连接失效时阻断联网，不自动换回电脑原本的网络 |
+| 不想把整台电脑交给 AI | 只开放选中的项目，每个目录可选“允许修改”或“只读” |
+| 不想把工具和依赖装在本机 | AI 工具在单独环境里安装，关掉再开保留工具和登录信息 |
+| 想少露一些电脑信息 | 使用独立机器标识，默认遮住硬件目录；实际效果可以直接对比 |
+| 长任务想稍后回来继续 | 用 `aibox tmux` 保留会话，电脑和 Docker 需要保持运行 |
 
-aibox 的核心用途是：让 Claude Code 在容器里通过远程代理或 VPN 联网，尽量避免向 AI 服务直接暴露宿主机的真实公网 IP 和本机环境信息，以降低相关账号风控与封号风险。Codex 等终端工具也可以使用同一套环境。
+> aibox 不附带节点，不会替浏览器换网络，也不能保证不封号。CPU、内核和部分机器信息仍可能可见。[查看具体边界](#security)
 
-**aibox 不保证防封号，也不提供完整的机器指纹伪装。** 它提供网络与文件隔离；账号身份、使用行为、出口 IP 信誉和服务规则仍会影响账号状态。具体保护范围见下方说明。
+<a id="demo"></a>
 
-## 能做什么
+## 两个命令，看完整操作
 
-- **完整终端**：直接用你的系统终端进入，bash、git、node、python、编译工具链都有；长任务可以放进可恢复的会话
-- **独立出口**：工作容器的运行时流量强制走远程代理或 VPN，提供 DNS、IPv4、IPv6 泄漏防护和断线阻断，不改动你电脑的网络
-- **文件授权**：只有你选的项目文件夹对容器可见，每个文件夹单独设置能否修改
-- **人和 AI 都能配置**：人用交互式向导；AI agent 用非交互命令（见 [AGENTS.md](AGENTS.md)）
+配置用 **`aibox init`**，日常使用用 **`aibox claude`**。
 
-文档：[使用指南](docs/GUIDE.md) · [架构与安全设计](docs/ARCHITECTURE.md) · [代码地图](docs/CODEMAP.md) · [AI agent 操作规则](AGENTS.md)
+![aibox init 完整配置向导与 aibox claude 首次启动实录](docs/media/aibox-init-claude.gif)
+
+[下载完整视频 · 1080p MP4](https://github.com/seqi781/aibox/raw/refs/heads/main/docs/media/aibox-init-claude.mp4) · [跳到安装步骤](#quick-start)
+
+演示包含：粘贴节点、选择项目、设置能不能修改文件，最后打开 Claude Code 登录入口。节点链接和 IP 已隐藏，下载与启动的等待已加快；没有登录个人账号或调用模型。
+
+<a id="quick-start"></a>
+
+## 快速开始
+
+### 先准备好
+
+- **Docker 已安装并打开**：macOS、Linux 可直接使用；Windows 在 WSL2 里运行。
+- **能用的远程节点、订阅链接或 VPN 配置**：已有 Clash / v2rayN 的远程节点可以复用，但不能填写它们的本地代理端口。
+- **要交给 AI 的项目文件夹**：只选具体项目，再决定能不能修改。
+
+<details>
+<summary>还没装 Docker？按系统查看</summary>
+
+| 系统 | 准备方式 |
+|---|---|
+| macOS | 打开已有的 OrbStack、Docker Desktop 或 Colima；也可按 [Docker Desktop 安装说明](https://docs.docker.com/desktop/setup/install/mac-install/) 准备 |
+| Linux | 按 [Docker 安装说明](https://docs.docker.com/engine/install/) 安装 Docker Engine、Compose v2 并启动 Docker |
+| Windows | 安装 Docker Desktop 并开启 [WSL2 集成](https://docs.docker.com/desktop/features/wsl/)，后续在 WSL 终端中操作 |
+
+装好后新开终端。aibox 会检查 Docker 能不能用，有问题会提示处理方法。
+
+</details>
+
+### 1. 下载，跟着提示配置
+
+```bash
+git clone https://github.com/seqi781/aibox.git ~/aibox
+cd ~/aibox
+./aibox init
+```
+
+| 向导步骤 | 你需要做什么 |
+|---|---|
+| ① 环境检查 | 检查 Docker，有问题按提示处理 |
+| ② 网络出口 | 粘贴远程节点或订阅，也可以用 VPN 配置；立即测试能不能连上 |
+| ③ 项目目录 | 选择文件夹，再选“允许修改”或“只读” |
+
+问是否安装 `aibox` 命令时选“是”，以后在任意终端都能使用。确认立即启动后会显示检查结果；时区和语言按节点地区设置，AI 工具第一次使用时自动安装。
+
+### 2. 在项目里打开 Claude Code
+
+第一次装好命令后，新开一个终端窗口：
+
+```bash
+cd ~/code/myapp   # 换成刚才选好的项目文件夹
+aibox claude
+```
+
+第一次按提示登录，以后再打开会保留安装内容和已保存的登录信息。想用 Codex，运行 `aibox codex`。
+
+看到 Claude Code 的登录页或主界面，就走通了。上网不正常，用 `aibox doctor` 查看原因；改节点或项目，用 `aibox config`。
+
+<details>
+<summary>想让 AI 帮你配置？复制这段话</summary>
+
+```text
+请帮我在本机配置 aibox：
+https://github.com/seqi781/aibox
+
+先看项目里的 AGENTS.md，检查 Docker 能不能用。
+问清楚我用哪个远程节点、选哪个项目文件夹、能不能修改文件，不要替我猜。
+节点链接、密码和密钥由我在本机输入，不要放进聊天、截图或提交里。
+按 AGENTS.md 的说明配置好，实际测试，有需要注意的地方就告诉我。
+最后教我在选好的项目文件夹里运行 aibox claude。
+```
+
+</details>
+
+<a id="compare"></a>
+
+## 本机 vs aibox，直接看数据
+
+```bash
+aibox compare
+```
+
+本机和 aibox 并排显示实际 IP、系统、CPU、内存、电脑名和文件权限。输出样式示意，下面的 IP 与数值均为示例：
+
+```text
+项目          本机                    aibox                   对比
+IPv4          192.0.2.10              198.51.100.20           ✓ ≠
+系统          macOS                   Debian GNU/Linux       ✓ ≠
+CPU核心       10                      10                     ⚠ =
+内存          24.0 GiB                7.8 GiB                ✓ ≠
+硬件目录      可读                    已遮挡                 ✓ 受限
+本机文件      当前用户权限            1 可写 / 1 只读        ✓ 受限
+```
+
+`✓` 不同或受限 · `⚠` 相同或仍可见 · `—` 未验证。机器 ID、开机 ID 只显示前 8 位。结果比较的是工具能接触的信息，不是封号概率。
+
+- 截图分享用 `aibox compare --redact`，隐藏 IP、电脑名和 ID。
+- 不查询上网 IP，用 `aibox compare --offline`。
+- 更新前的旧容器不算已受保护；新防护需要重建后生效，对比命令不会替你中断任务。
+
+## 日常命令
+
+| 命令 | 用来做什么 |
+|---|---|
+| `aibox init` | 第一次配置 |
+| `aibox claude [项目]` | 打开 Claude Code，第一次自动安装 |
+| `aibox codex [项目]` | 打开 Codex |
+| `aibox shell [项目]` | 进入 aibox 的命令行，`exit` 返回 |
+| `aibox tmux [项目]` | 离开终端后保留任务会话 |
+| `aibox status` | 看运行状态和出口 IP |
+| `aibox compare` | 本机与 aibox 的实际数据对比 |
+| `aibox doctor` | 检查网络、断线保护和配置问题 |
+| `aibox config` | 换节点、调整项目及读写权限 |
+| `aibox restart` | 重新启动，让修改后的设置生效 |
+| `aibox stop` | 停止，保留项目、工具和登录信息 |
+
+先 `cd` 到选好的项目文件夹再启动，也可写项目名，例如 `aibox claude myapp`。想模拟一次节点断线，运行 `aibox doctor --full`；它会临时中断 aibox 的网络。
+
+<a id="faq"></a>
+
+## 常见问题
+
+**我已经在用 Clash / v2rayN，还需要另外买节点吗？**
+
+只要现有远程节点或订阅能用，就可以复用。配置时粘贴链接，不是填写电脑上 Clash / v2rayN 的本地代理地址。
+
+**AI 修改的文件会同步到我的项目吗？**
+
+文件就在原来的文件夹里。“允许修改”会真的改动本机文件；“只读”只能看、不能改。不要开放整个用户文件夹或存放密码、密钥的目录。
+
+**为什么本机与 aibox 显示相同 IP？**
+
+本机也可能在用同一节点，不能只凭相同 IP 就认定泄漏。如果没有查到本机直连出口，就还无法确认真实宽带 IP 的区别。可以用 `aibox doctor --full` 另外验证断线阻断。
+
+**显示“网关不健康”、启动不了或没法上网怎么办？**
+
+先用 `aibox doctor` 看提示，再用 `aibox config` 检查节点；改好后 `aibox restart`。不需要改本机全局网络。
+
+**中风险、高风险，或者 IP 评分是什么意思？**
+
+先看具体原因，例如连接失败、节点地区、机房 IP、代理标记或滥用记录。第三方评分和检测报告只是参考，不能换算成封号概率；没有查到也不代表没有风险。
+
+**关掉终端、合上电脑，任务还能继续吗？**
+
+`aibox tmux` 可以在关闭终端窗口后保留会话，再运行同一命令回来。电脑和 Docker 必须保持运行；合盖休眠、退出 Docker 或停止 aibox，都不能保证任务继续。
+
+**需要指纹浏览器吗？**
+
+aibox 提供终端环境，不附带浏览器。你在自己的浏览器里打开登录链接时，走的是浏览器自己的网络，aibox 不会替它换网络。
+
+<a id="security"></a>
+
+## 使用前，先了解这些边界
+
+aibox 帮你限制工具的网络和文件范围，不会让电脑或登录账号完全匿名。
+
+<details>
+<summary>IP、机器信息、文件和登录记录，哪些仍可能暴露？</summary>
+
+- **上网 IP**：aibox 里的工具通过节点联网，对面的服务看到节点 IP；节点服务商仍能看到你连过去的来源 IP。自己的浏览器和其他软件使用各自的网络。
+- **本机文件**：选中的项目、Git 提交记录或另外传入的设置，仍可能包含姓名、邮箱和密钥。aibox 不会替你清理这些内容，挂载信息也可能带出本机路径。
+- **机器信息**：使用容器自己的电脑名和独立机器标识，默认遮住硬件目录；CPU 架构、部分 CPU / 内存信息、内核及 Linux 开机标识仍可能可见，工具也可能识别出容器。
+- **安装和检查**：镜像构建、节点配置下载、节点地址查询可能使用本机网络。环境检查还会访问第三方 IP / DNS 服务，它们会看到查询来源；对比表默认显示实际 IP，公开截图前用 `--redact`。
+- **登录和记录**：工具、凭据、命令历史保存在独立 home 中。停止或重启不会自动退出账号、清空记录；使用同一账号仍可被关联。
+- **兼容性**：硬件目录遮挡可能影响 GPU、设备发现和监控工具，调整方式见 [使用指南](docs/GUIDE.md#hardware-privacy)。
+- **账号限制**：aibox 不关闭 AI 工具自身的信息收集，不修改账号标识，不保证不封号。账号、使用行为、节点及平台规则仍然重要。
+
+完整说明见 [架构与安全设计](docs/ARCHITECTURE.md)。
+
+</details>
+
+<details>
+<summary>想了解原理？查看技术要点与方案对比</summary>
+
+| 技术要点 | 实际作用 |
+|---|---|
+| 网关和工作区分开 | 管网络的容器与运行 AI 的容器分开；工作区移除改路由、防火墙所需的关键权限 |
+| 断线阻断 | 先设置阻断规则，再连接节点；节点失效或列表为空时不回落直连 |
+| DNS / IPv6 防护 | 网关接管 DNS，限制绕过隧道的连接；可用体检验证 |
+| 项目读写权限 | 只挂选中的目录，只读由系统限制；用户编号对齐，方便继续编辑文件 |
+| 原生终端与 tmux | 直接接入自己的终端；启动工具时交接进程，长任务可放入可恢复会话 |
+| 机器信息防护 | 独立机器标识和硬件目录遮挡，减少一部分本机信息暴露 |
+
+| 方式 | 网络影响范围 | 文件范围 | 断线处理 |
+|---|---|---|---|
+| 本机代理 / VPN | 取决于软件和分流设置 | 本机用户权限及工具授权 | 取决于客户端和规则 |
+| 只设 `HTTP_PROXY` | 遵守代理变量的程序 | 取决于运行环境 | 取决于配置 |
+| 完整虚拟机 | 虚拟机里的程序 | 虚拟机和共享目录 | 取决于虚拟机网络配置 |
+| **aibox** | **从 aibox 里启动的程序** | **指定项目及其读写权限** | **内置断线阻断，可模拟验证** |
+
+macOS 下仍需要 Docker 的 Linux 运行环境，但不必另外配置完整虚拟机。整体内存和启动耗时取决于 Docker、工具及任务。
+
+这些机制不能保证免疫恶意提示词、阻止所有容器逃逸或隐藏全部硬件信息。详见 [架构](docs/ARCHITECTURE.md) 和 [代码地图](docs/CODEMAP.md)。
+
+</details>
+
+## 文档、服务与交流
+
+- [使用指南](docs/GUIDE.md)：配置、登录、常用操作和报错处理。
+- [提交问题或建议](https://github.com/seqi781/aibox/issues)：写清系统、操作和报错，隐藏节点链接、密码、密钥及真实 IP。
+- [UseHooo 服务页面](https://usehooo.com/aibox)：配置协助及相关服务；具体项目与售后规则以服务页面为准。
+- [Telegram 交流入口](https://t.me/+3wcYpPtDyR9lNjE1)。
+
+<details>
+<summary>查看配置截图、宣传素材与开发文档</summary>
 
 | `aibox init`：选择项目与权限 | `aibox claude`：首次启动 |
 |---|---|
 | [![aibox init 配置过程](docs/media/configuration.png)](docs/media/configuration.png) | [![aibox claude 首次登录入口](docs/media/claude-start.png)](docs/media/claude-start.png) |
 
-## 真实 IP、机器信息与账号风险
+[完整宣传素材](docs/media/README.md) · [代码地图](docs/CODEMAP.md) · [AI agent 操作规则](AGENTS.md) · [测试目录](tests/)
 
-| 关注点 | aibox 的保护范围 | 仍然存在的边界 |
-|---|---|---|
-| 真实公网 IP | 容器内 Claude Code 的联网请求经远程节点发出，目标服务看到节点的出口 IP；网关断线时阻断联网 | 宿主机浏览器、宿主机上的其他程序不在保护范围内；代理 / VPN 服务商仍能看到连接来源 |
-| 宿主机文件与环境 | 使用独立的容器文件系统和 home 卷，只把你授权的项目目录交给工具 | 已授权文件、项目的 Git 元数据、主动传入的环境变量仍可能包含本机或身份信息 |
-| 机器信息 | 工具运行在 Linux 容器环境，减少直接接触宿主机系统与个人配置 | 容器仍可见内核、CPU 架构、部分资源信息；UID/GID 与宿主机对齐，不承诺隐藏全部硬件特征或消除设备关联 |
-| 账号风控与封号 | 提供独立出口、断线阻断和环境检查，帮助发现网络与配置问题 | 不修改 AI 工具自身的遥测或账号标识；检测结果不代表服务商的风控结论，不能保证账号不被限制 |
+`config/`、`.aibox/` 和 Claude 的本地设置默认不进 Git。不要把其中的节点链接、密码或密钥另外复制进项目文件或 Issue。
 
-以下流量也需要区分：
-
-- **浏览器登录授权**：在宿主机浏览器中打开的登录链接使用浏览器自己的网络，aibox 不会代理它。
-- **初始化与构建**：镜像拉取、构建、订阅预检与首次订阅下载，以及代理节点域名的引导解析，可能使用宿主机或网关的直连网络，不属于工作容器内 AI 请求的代理链路。
-- **环境检查**：为对比本机与代理出口，检测过程会从宿主机向第三方 IP / DNS 检测服务发起请求；这些检测服务会看到本机 IP。报告也可能包含真实 IP，分享前请脱敏。
-
-登录凭据与 AI 工具保存在独立的 Docker home 卷中，停止、重启容器不会清除。环境检查通过只代表已检查的项目通过；完整设计与已知限制见 [架构与安全设计](docs/ARCHITECTURE.md)。
-
-## 安装
-
-**1. 安装 Docker**
-
-| 系统 | 命令 |
-|---|---|
-| macOS | `brew install orbstack`（或 Docker Desktop），然后启动它 |
-| Linux | `curl -fsSL https://get.docker.com \| sudo sh && sudo usermod -aG docker $USER`，然后重新登录 |
-| Windows | 安装 Docker Desktop 并开启 WSL2 集成，之后在 WSL 终端里操作 |
-
-**2. 获取 aibox 并运行配置向导**
-
-```bash
-git clone https://github.com/seqi781/aibox.git ~/aibox
-cd ~/aibox
-./aibox init      # 3 步：环境检查 → 粘贴订阅或分享链接（自动识别并测试）→ 选择项目文件夹
-```
-
-向导里会问是否安装 `aibox` 命令，选"是"以后就能在任意目录使用。
-
-需要准备远程代理订阅、节点分享链接或 VPN 配置，以及准备授权的项目目录。aibox 不附带节点，也不接受宿主机上的 Clash / v2rayN 本地代理端口作为上游。
-
-## 使用
-
-只需要这 10 个命令（只输入 `aibox` 也会显示）：
-
-| 命令 | 作用 |
-|---|---|
-| `aibox init` | 第一次使用：配置向导 |
-| `aibox claude [项目]` | 启动 Claude Code（第一次运行时自动安装） |
-| `aibox codex [项目]` | 启动 Codex |
-| `aibox shell [项目]` | 进入容器终端（`exit` 退出） |
-| `aibox tmux [项目]` | 进入可恢复的会话：关掉终端窗口，里面的程序也继续运行 |
-| `aibox status` | 查看运行状态和出口 IP |
-| `aibox stop` | 停止（数据保留） |
-| `aibox restart` | 重启；修改配置后用它让配置生效 |
-| `aibox doctor` | 检查网络、断网保护和环境风险 |
-| `aibox config` | 修改配置（网络出口、项目文件夹） |
-
-```bash
-cd ~/code/myapp
-aibox claude        # 在这个项目里启动 Claude Code
-aibox tmux          # 长任务：进入会话后运行 claude；Ctrl+b 再按 d 离开，再次运行 aibox tmux 回来
-```
-
-- 先 `cd` 到项目文件夹再运行，就进入容器里对应的位置；也可以写项目名：`aibox claude myapp`。
-- 第一次运行 `claude` / `codex` 时按提示登录一次，登录状态会一直保存。
-- 更多说明见 [使用指南](docs/GUIDE.md)。
-
-## 常见问题
-
-- **我用的是 v2rayN / Shadowrocket / Clash Verge，能用吗？** 能。运行 `aibox config`，把订阅链接或节点分享链接粘贴进来，格式会自动识别。
-- **能不能直接用电脑上正在运行的 Clash？** 不能，这是有意的设计：Clash 的分流规则可能让部分流量直连，出口就不受控了。请把 Clash 里的订阅链接粘贴进来。
-- **启动时报网关不健康**：节点连不上，或订阅失效。运行 `aibox doctor` 查看原因。
-- **AI 工具怎么装？** 不用装，第一次运行 `aibox claude` / `aibox codex` 时自动安装。
-- **时区和语言？** 自动按代理出口 IP 的地区设置，和出口保持一致。
-- **怎么检查网络隔离？** 运行 `aibox doctor`，检查网络与配置，并查看出口 IP 的风险判定；`aibox doctor --full` 还会模拟断线，验证阻断行为。结果不能作为防封号保证。
-- **订阅、密钥和登录信息会提交到 GitHub 吗？** 本地配置 `config/` 和运行数据 `.aibox/` 已被 Git 忽略；容器登录凭据保存在 Docker home 卷。不要把这些内容另存到项目文件或贴进 issue，分享日志和报告前先脱敏。
+</details>

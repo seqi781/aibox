@@ -8,8 +8,8 @@ ok()  { echo "  ✔ $*"; }
 bad() { echo "  ✘ $*"; fail=1; }
 
 echo "静态检查"
-HOST_BASH="aibox tests/cli.sh tests/lint.sh tests/run.sh"
-POSIX_SH="images/mihomo-gateway/entrypoint.sh images/mihomo-gateway/healthcheck.sh images/mihomo-gateway/validate-upstream.sh"
+HOST_BASH="aibox lib/compare.sh lib/compare-display.sh tests/cli.sh tests/lint.sh tests/run.sh tests/workspace-privacy.sh"
+POSIX_SH="lib/environment-probe.sh images/mihomo-gateway/entrypoint.sh images/mihomo-gateway/healthcheck.sh images/mihomo-gateway/validate-upstream.sh"
 
 for f in $HOST_BASH; do bash -n "$f" || bad "bash 语法错误: $f"; done
 for f in $POSIX_SH; do sh -n "$f" || bad "sh 语法错误: $f"; done
@@ -17,7 +17,7 @@ for f in $POSIX_SH; do sh -n "$f" || bad "sh 语法错误: $f"; done
 
 # bash 4+ 才有的语法（aibox 必须兼容 macOS 自带的 bash 3.2）
 pat='declare -[Anlu]|local -[An]|mapfile|readarray|\$\{[A-Za-z_]+(,,|\^\^)\}|;;&|\|&|&>>|coproc|\[\[ -v |@[QEPAa]\}|\[-1\]\}|wait -n|globstar|EPOCHSECONDS|read -[a-z]*i|\{[a-z0-9]+\.\.[a-z0-9]+\.\.|exec \{[a-z]'
-if hits="$(grep -nE "$pat" aibox)"; then bad "使用了 bash 4+ 语法:"; echo "$hits" | sed 's/^/      /'; else ok "没有 bash 4+ 专有语法"; fi
+if hits="$(grep -nE "$pat" aibox lib/compare.sh lib/compare-display.sh)"; then bad "使用了 bash 4+ 语法:"; echo "$hits" | sed 's/^/      /'; else ok "没有 bash 4+ 专有语法"; fi
 
 # macOS 的 bash 3.2 在 UTF-8 环境下会把 $var 后面紧跟的中文字节当成变量名的一部分
 hits="$(perl -ne 'print "$ARGV:$.: $_" if /\$[A-Za-z_][A-Za-z0-9_]*[\x80-\xff]/' $HOST_BASH $POSIX_SH images/workspace/rootfs/usr/local/bin/* 2>/dev/null)"
