@@ -1,5 +1,7 @@
 # aibox 代码地图
 
+[文档目录](README.md) · [使用指南](GUIDE.md) · [架构](ARCHITECTURE.md) · [许可说明](LICENSING.md)
+
 给想修改 aibox 的人和 agent：每个文件做什么、`aibox up` 时发生了什么、改某样东西该去哪里。
 设计原因和威胁模型见 [ARCHITECTURE.md](ARCHITECTURE.md)，命令用法见 [GUIDE.md](GUIDE.md)。
 
@@ -42,14 +44,21 @@ config.example/                配置模板；init 时复制到 config/（config
   mihomo/links.txt             导入的分享链接（由 upstream.yaml 中的 links 文件提供者引用）
   gluetun.env, gluetun/        VPN 配置
 docs/
+  README.md                    文档总目录，按用户 / 自动配置 / 维护 / 许可导航
   GUIDE.md                     使用指南（aibox guide）
+  COMPARE.md                   实际数据对比、选项、未验证项和硬件防护生效
   ARCHITECTURE.md              架构、威胁模型、已知限制
   CODEMAP.md                   本文件
+  LICENSING.md                 运行、复制、转载、分发及商用的授权说明
+  THIRD_PARTY_NOTICES.md        上游组件与各自许可，不受项目专有条款重新授权
   media/                       README 终端动画、MP4、截图及脱敏后的录制数据
+LICENSE                        允许个人下载使用，限制改作、再分发和售卖
 AGENTS.md / CLAUDE.md          agent 自动读取的操作规则与安全边界
 tests/                         兼容性测试（tests/run.sh；见第 6 节）
 （宣传站已迁出，本仓库只维护终端工具及其文档）
 ```
+
+本文是技术操作说明，不授予修改或分发代码的版权许可；相应操作应已获授权。第三方内容继续适用其原有条款。
 
 运行时生成、不进 git 的目录：`config/`（用户配置）、`.aibox/compose.generated.yaml`（挂载与端口）、`.aibox/geo.env`（最近一次检测到的出口地区）。
 

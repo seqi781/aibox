@@ -1,0 +1,107 @@
+aibox 个人使用许可与权利保留声明 1.0
+aibox Personal Use License and Reservation of Rights 1.0
+
+Copyright (c) 2026 the aibox copyright holders. All rights reserved.
+
+1. 适用范围
+
+本声明适用于本仓库中由 aibox 著作权人拥有权利的原创程序代码、脚本、
+配置模板、文档及演示素材（以下简称“本项目内容”）。第三方内容、第三方
+软件及其依赖不受本声明重新授权，适用第 5 条。
+
+2. 允许个人下载和使用
+
+在保留版权及许可声明、遵守本声明限制的前提下，著作权人向自然人授予
+免费、非独占、不可转让的个人使用许可，允许：
+  a. 下载、保存、阅读、安装本项目，并在本人拥有或控制的设备或环境中
+     自行运行；
+  b. 为上述个人使用构建仅供本人使用的本地容器镜像，修改本人配置，
+     以及制作必要的个人备份；
+  c. 下载并在个人使用范围内阅读随附文档、观看演示素材。
+
+上述个人下载和使用无需另外申请书面授权。个人使用本项目处理自己的
+合法学习或工作项目，不因本声明受到限制；本许可不限制用户依法利用
+其自有项目及成果。
+
+个人使用许可不等于一般源码改作或再分发许可，也不授权向第三方交付
+本项目、供他人使用的镜像或服务。企业、组织统一部署及其他超出上述
+个人范围的使用，需另行取得书面授权。
+
+3. 其他权利保留与限制
+
+除第 2 条的个人使用许可、第 4、5 条规定的权利、适用法律允许的行为，
+或著作权人另行明确书面授权外，不授予源码修改、合并、发布、分发、
+再许可、销售本项目内容或据此创作衍生作品的许可。
+
+未经事先书面授权，尤其不得：
+  a. 将本项目内容完整或实质性复制、搬运至其他仓库、网站、产品或软件包；
+  b. 改名、换标、移除版权或授权声明后重新发布，或冒充原作者、官方版本；
+  c. 公开发布修改版、二次打包版、安装包、镜像或基于本项目内容的衍生项目；
+  d. 销售、出租、再许可本项目内容，或以交付本项目、供第三方使用本项目
+     为目的，提供收费分发、托管、代部署、预装或其他商业服务；
+  e. 将本项目中受著作权保护的代码、文档或素材纳入其他项目。
+
+仓库公开、提供技术说明或安装步骤，不扩大第 2 条已授予的个人使用权。
+注明来源、保留原作者名称、免费提供或非商业目的，本身均不能代替超出
+个人许可范围所需的书面授权。技术操作指南不额外授予改作或分发权，
+有效书面授权优先决定其另行约定的范围。
+
+4. GitHub 平台及法律例外
+
+本声明不限制适用法律中不可排除的权利或例外，也不试图撤销因公开托管
+而依 GitHub 服务条款已授予 GitHub、其关联方或其他用户的权利，包括
+依平台功能在 GitHub 服务内浏览、展示及 Fork 的权利。
+
+上述平台权利不因本声明而扩大为站外分发、改名发布、出售或其他未授权
+使用的许可。本声明也不能从技术上阻止公开内容被下载或保存。
+
+5. 第三方内容及既有授权
+
+第三方软件、依赖、商标、界面和其他第三方内容的权利归各自权利人所有，
+继续适用其原有许可及条款。本声明不限制第三方许可证已授予的权利，也
+不将其代码或界面转为 aibox 的专有内容。主要上游说明见
+docs/THIRD_PARTY_NOTICES.md。
+
+用户自行提供的项目、配置、密钥及其他自有内容不因使用 aibox 而受本声明
+约束，其权利仍归相应权利人。本声明不追溯撤销此前已明确、合法授予的
+许可；其范围应根据当时的有效条款或书面约定确定。
+
+6. 超出个人许可范围的书面授权
+
+个人下载和第 2 条范围内的使用无需提出申请。如需组织部署、源码改作、
+转载、分发、销售、商业服务或其他超出个人使用的许可，请通过官方仓库
+https://github.com/seqi781/aibox 联系著作权人。提出请求、未收到回复、
+向第三方付款或获得第三方服务，均不等于取得额外授权。书面授权应明确
+被授权人、版本、行为及范围；超出约定范围仍需另行许可。
+
+7. 无担保及责任范围
+
+在适用法律允许的范围内，本项目内容按现状提供，不附带适销性、特定
+用途适用性、不侵权或其他担保；不承诺匿名、网络绝不泄漏或账号不受限。
+在适用法律允许的范围内，著作权人不对使用或无法使用本项目内容所引起
+的损失承担责任。本条不排除适用法律规定不得排除或限制的责任。
+
+8. 文本与版本
+
+本声明自包含本文件的仓库版本起作为该版本的许可声明。另有有效书面
+授权的，按该授权处理。以下英文摘要仅供阅读，解释本声明时以中文正文
+为准；本声明并非开放源代码许可证。
+
+English summary (informational; the Chinese text controls)
+
+Individuals may download, install and run aibox on devices or environments they
+own or control, without a separate written request or license fee. Necessary
+personal backups, personal configuration changes and locally built container
+images for that individual's own use are allowed, with notices preserved.
+Individuals may use it for their own lawful study or work projects; this license
+does not restrict their own project content or resulting work.
+
+No general right to modify aibox source code, redistribute, rebrand, incorporate
+it into another project, sublicense, sell it, deploy it across an organization
+or provide it as a third-party service is granted. Those activities require
+separate written authorization unless an applicable legal exception, third-party
+license, existing valid grant or GitHub platform right permits them.
+Third-party rights and content remain governed by their own terms. This is not
+an open-source license and cannot technically prevent copying or override
+GitHub's public-repository terms. The work is provided without warranties to the
+extent permitted by law. All rights not expressly granted are reserved.

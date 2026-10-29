@@ -1,13 +1,25 @@
 # aibox 使用指南
 
-在终端里随时运行 `aibox guide` 查看本文。
+[文档目录](README.md) · [对比说明](COMPARE.md) · [使用许可](LICENSING.md)
+
+本文按“日常使用”和“自动配置 / 完整参考”分开。
+
+个人用户可按 [LICENSE](../LICENSE) 直接下载安装并本地使用；超出个人许可范围的行为需另行授权。
 
 - **第一部分（第 1–4 节）给人看**：日常使用和本机对比。
 - **第二部分（第 5–8 节）给 AI agent 和脚本看**：非交互配置流程和完整命令参考，人不需要读。仓库根目录的 `AGENTS.md` / `CLAUDE.md` 会被 agent 自动读取。
 
+## 目录
+
+[1. 首次配置](#setup) · [2. 日常操作](#daily) · [3. 使用 AI 工具](#tools) · [4. 常见问题](#faq)
+
+[5. 非交互配置](#automation) · [6. 完整命令](#reference) · [7. Linux](#linux) · [8. 排查与重置](#troubleshooting)
+
 ---
 
 # 第一部分：给人看
+
+<a id="setup"></a>
 
 ## 1. 第一次使用
 
@@ -28,6 +40,8 @@ cd ~/aibox
 
 时区、语言、AI 工具都不用配置：时区和语言按出口 IP 的地区自动设置，Claude Code / Codex 第一次运行时自动安装。
 
+<a id="daily"></a>
+
 ## 2. 常用命令
 
 | 命令 | 作用 |
@@ -46,23 +60,11 @@ cd ~/aibox
 
 只输入 `aibox` 会显示这张表。
 
-**想知道 aibox 实际遮住了什么：** 运行 `aibox compare`。它读取当前终端和正在运行的 aibox，比较 IP、电脑名称、机器标识、硬件目录、用户编号、实际开放的文件及权限。它不读取 Claude 账号、密钥或使用记录，不会启动或重启容器，也不会替你判断封号概率。
-
-- 默认向 `api.ipify.org` / `api6.ipify.org` 查询两边的上网 IP，检测网站会看到各自的来源 IP。本机已经开代理时，查到的是当前代理出口，未必是真实宽带 IP。
-- 默认输出紧凑表格：本机和 aibox 并排显示实际 IP、电脑名、系统、CPU、内存和读写数量，用 `✓`、`⚠`、`—` 标记差异、仍可见和未验证。机器 ID、开机 ID 只显示前 8 位。
-- `aibox compare --offline` 跳过联网查询；截图分享时用 `--redact` 隐藏 IP、电脑名和 ID；`--json` 保持脱敏的结构化结果。
-- 原始数据只在本机比较和显示，不自动保存，也不传入另一边。终端内容和手动重定向的文件可能包含实际 IP，公开前请检查。
-- 本机一列按当前终端能访问的范围说明；Claude 自己的授权规则可能进一步限制访问。可读取不代表已读取或上传。
-- 未运行、读取失败或查询失败会注明“未验证”，检测不完整返回 2；完成返回 0（包含主动跳过的查询）。返回 0 不代表没有暴露项，具体看报告。
-- 普通对比不模拟断线，也不检查节点信誉；网关健康不代表断线阻断已验证。需要模拟断线时使用 `aibox doctor --full`。
+**看本机与 aibox 的差异：** 运行 `aibox compare`，用实际数据和 `✓ / ⚠ / —` 并排显示。截图分享加 `--redact`，不查询 IP 加 `--offline`。[字段、选项和结果含义](COMPARE.md)。
 
 <a id="hardware-privacy"></a>
 
-**关于电脑信息防护：** 新环境默认遮住 `/sys` 硬件目录，并在独立的 home 中生成机器标识。更新后要重新构建并重建 workspace 才会生效，`aibox compare` 会检查实际运行的容器，旧容器不会被当成已经更新。重新构建会中断该容器中的任务，请先保存工作。
-
-GPU、设备发现、部分硬件监控及依赖 `/sys` 的工具可能受影响。这类项目可在 `config/aibox.env` 中设置 `AIBOX_HIDE_HARDWARE=0`，再重建工作容器；对比会显示防护关闭后的暴露项。普通代码编辑、Node、Python、Git 的验证不代表所有开发工具都兼容。
-
-这不会改写 CPU 指令、内核返回值、共享开机标识或 Claude 自身的数据收集，也不能保证工具不知道自己在容器里。Linux 容器可能与本机使用同一个内核；macOS / WSL2 使用 Docker 所在的 Linux 环境。共享项目的文件、Git 记录、挂载信息和相同的登录账号仍可能关联身份。
+**硬件信息防护：** 默认遮住硬件目录；GPU、设备发现等工具可能受影响。旧容器需要在保存任务后重建，单纯更新脚本或执行对比不会应用防护。[生效步骤与兼容性](COMPARE.md#hardware-privacy)。
 
 **怎么指定项目：** 先在终端里 `cd` 到项目文件夹，再运行命令，就会进入容器里对应的位置，例如 `~/code/myapp/src` → `/workspace/myapp/src`。不在项目文件夹里时，可以在命令后面写项目名：`aibox claude myapp`。
 
@@ -72,15 +74,17 @@ GPU、设备发现、部分硬件监控及依赖 `/sys` 的工具可能受影响
 
 **`aibox tmux`：** 适合长时间运行的任务。
 - 每个项目一个会话。在会话里运行 `claude` 或 `codex`，工具会在新窗口里打开，退出后回到原来的窗口。
-- 按 `Ctrl+b` 再按 `d` 离开，里面的程序继续运行；关掉终端窗口也一样。
+- 按 `Ctrl+b` 再按 `d` 离开，里面的程序继续运行；关掉终端窗口也一样。电脑和 Docker 需要保持运行，休眠或停止容器后不能保证任务继续。
 - 再次运行 `aibox tmux` 回到原处。
 - 按 `Ctrl+b` 再按数字切换窗口。底部状态栏一直显示这些按键提示。
 
 **继续上次的对话：** 参数会原样传给工具，例如 `aibox claude -c`（Claude Code）、`aibox codex resume --last`（Codex）。
 
+<a id="tools"></a>
+
 ## 3. 使用 Claude Code / Codex
 
-**首次登录**（只需一次，登录状态会一直保存）：
+**首次登录**（登录信息会保存在独立 home 中，过期后可能需要重新登录）：
 - `aibox claude`：按提示在浏览器打开链接，把授权码粘贴回终端。
 - `aibox codex`：容器里没有浏览器，选择设备码登录。
 
@@ -90,6 +94,8 @@ GPU、设备发现、部分硬件监控及依赖 `/sys` 的工具可能受影响
 - **项目说明文件**：在项目根目录放 `CLAUDE.md`（Claude Code）或 `AGENTS.md`（Codex），写上构建、测试命令和约定，AI 会自动读取。
 - **git 与 SSH**：在容器里单独生成密钥（`ssh-keygen`，会一直保存），只加到需要的仓库，不要把 Mac 上的 `~/.ssh` 交给容器。
 - **安装依赖**：在容器里 `npm i -g`、`pip install --user` 装的东西会一直保留。
+
+<a id="faq"></a>
 
 ## 4. 常见问题
 
@@ -101,11 +107,13 @@ GPU、设备发现、部分硬件监控及依赖 `/sys` 的工具可能受影响
 | 启动时报网关不健康，或容器里没有网络 | 节点连不上或订阅失效。运行 `aibox doctor` 查看原因，必要时 `aibox config` 换一个订阅 |
 | 修改了配置但没生效 | 运行 `aibox restart` |
 | 想检查网络是否安全、出口 IP 风险高不高 | 运行 `aibox doctor` |
-| 想彻底重来 | 让 AI agent 按第 8 节处理，或在 aibox 目录里运行 `./aibox destroy`，然后 `rm -rf config .aibox`，再 `./aibox init`。项目文件不受影响 |
+| 想重新配置 | 换节点或目录用 `aibox config`；清除登录和工具会删除数据，先确认范围并备份，见[排查与重置](#troubleshooting) |
 
 ---
 
 # 第二部分：给 AI agent 和脚本（人不需要读）
+
+<a id="automation"></a>
 
 ## 5. 非交互配置流程
 
@@ -123,7 +131,8 @@ GPU、设备发现、部分硬件监控及依赖 `/sys` 的工具可能受影响
 
 # 2. 出口（必须问用户要订阅链接或分享链接，不能自己编造，也不能填本机代理地址）
 #    用户给的内容原样从标准输入传入，aibox 会自动识别格式；不要自己转换
-printf %s "$USER_INPUT" | ./aibox import - --filter '日本|JP'
+printf %s "$USER_INPUT" | ./aibox import -
+# 仅当用户明确指定筛选条件时，才追加 --filter "$USER_FILTER"
 
 # 3. 授权用户明确指定的目录
 ./aibox mounts add rw ~/code/my-app
@@ -162,6 +171,8 @@ printf %s "$ANTHROPIC_API_KEY" | ./aibox config key ANTHROPIC_API_KEY
 - 不要尝试绕过严格出口策略：不要修改 `validate-upstream.sh`、网关的防火墙规则，也不要把本地代理地址写进配置。
 - 不要设置 `AIBOX_ALLOW_BROAD_MOUNT`，不要授权 `~`、`/` 或 `~/.ssh`，除非用户明确要求。
 - 不要挂载 Docker socket，不要给 workspace 增加 `NET_ADMIN` 等权限。
+
+<a id="reference"></a>
 
 ## 6. 完整命令参考
 
@@ -235,7 +246,7 @@ printf %s "$LINKS" | aibox import -                 # 从标准输入读取（�
 
 | 部分 | 内容 | 数据来源 |
 |---|---|---|
-| 本机 | 真实 IPv4 / IPv6、时区、本机 DNS 来源 | 本机直连 ipinfo.io、ipify、Google DNS |
+| 本机 | 当前终端查到的 IPv4 / IPv6、时区、本机 DNS 来源 | 从本机查询 ipinfo.io、ipify、Google DNS；已有代理可能影响结果 |
 | 出口 | 代理后的 IP、国家 / 地区、城市、运营商、IP 归属（ASN）、时区 | 经代理查询 ipinfo.io、proxycheck.io、ip-api.com |
 | IP 类型与风险 | 机房 / 住宅 / 移动网络、proxycheck 风险评分、是否被标记为代理 / VPN / Tor、StopForumSpam 滥用记录 | 经代理查询 |
 | DNS | 容器的 DNS 由谁解析、是否携带本机网段（泄漏检测） | 容器内查询 `o-o.myaddr.l.google.com` |
@@ -247,7 +258,11 @@ printf %s "$LINKS" | aibox import -                 # 从标准输入读取（�
 - **中风险**：机房 IP、被标记为代理 / VPN、风险评分 34–66、少量滥用记录、时区与出口不一致。
 - **低风险**：以上都没有。
 
-proxycheck.io 免费额度每天有限，查不到的项目会注明"未能检测"，不计入判定。
+第三方查询有额度和可用性限制，查不到的项目会注明“未能检测”，不计入判定；因此“低风险”不代表全部项目已验证，也不是封号概率。
+
+当前综合报告会把“本机与容器出口相同”列为高风险。本机已开代理时也会出现相同出口，不能据此确认直连泄漏；`aibox compare` 会显示这一不确定性。IPv6 查询失败也不单独证明阻断生效，断线保护应结合实际体检。
+
+<a id="linux"></a>
 
 ## 7. Linux 说明
 
@@ -264,14 +279,19 @@ proxycheck.io 免费额度每天有限，查不到的项目会注明"未能检�
 
 宿主机网络不受影响：所有防火墙规则只作用于网关容器自己的网络命名空间。
 
+<a id="troubleshooting"></a>
+
 ## 8. 故障排查
 
 | 现象 | 处理 |
 |---|---|
 | 装了 Docker 仍提示"未找到 docker" | 请用户先打开 OrbStack / Docker Desktop，再新开一个终端窗口。aibox 也会自动到 `~/.orbstack/bin`、`~/.docker/bin` 等位置查找 |
 | `aibox up` 报网关不健康 | `aibox logs gateway`。常见原因是订阅下载失败（检查链接）或节点全部不可用 |
-| 进入容器后没有网络 | `aibox status` 查看网关健康状态；网关重启过的话，任意 `aibox` 命令都会自动重新接入 |
+| 进入容器后没有网络 | `aibox status` 查看网关健康状态；网关重启后，启动或进入环境会重新接入；`compare` 只读，不会修复网络 |
 | 挂载目录里写不了文件 | `aibox doctor` 查看挂载权限；Linux 上检查宿主机目录的属主，SELinux 系统开启 `AIBOX_SELINUX_RELABEL` |
 | 构建镜像很慢 | 构建用的是电脑本身的网络。可以为 Docker 配置镜像加速，或在电脑上开启代理后再运行 `aibox up` |
 | 时区 / 语言不对 | 它们跟随出口 IP 的地区；`aibox test` 查看检测结果。要固定：`aibox config set AIBOX_TZ Asia/Tokyo`、`aibox config set AIBOX_LANG ja_JP.UTF-8`，然后 `aibox up` |
-| 彻底重来 | `aibox destroy`（删除容器和 home 卷，项目文件不受影响），`rm -rf config .aibox`，然后请用户运行 `aibox init` |
+| 仅重新配置 | 使用配置命令调整网络或目录，保留 home 中的工具和登录信息 |
+| 只删除容器 | `aibox down` 保留 home 和配置；执行前确认没有仍需运行的任务 |
+| 清除工具和登录 | 明确确认删除范围并备份后再用 `aibox destroy`；它会删除 home，挂载的项目目录不在此命令的删除范围内 |
+| 同时清除配置 | 配置包含节点和密钥，`.aibox/` 也可能有备份及独立测试实例。不要直接整体删除；先核对、备份并逐项确认 |

@@ -1,5 +1,7 @@
 # aibox 架构说明
 
+[文档目录](README.md) · [使用指南](GUIDE.md) · [代码地图](CODEMAP.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+
 ## 1. 目标
 
 | 需求 | 落地方式 |
@@ -7,7 +9,7 @@
 | 真实终端 | Debian 13 容器 + bash + tmux，`docker exec -it` 直连，没有 Web 终端或 SSH 中间层 |
 | 独立网络 | 网关容器独占网络栈，工作区容器共享它的网络命名空间；断线即断网 |
 | 本地文件 | 只 bind mount 授权目录，`ro` 由内核强制 |
-| 轻量 | 不额外装虚拟机（macOS 上复用 Docker 自带的那台 Linux VM）；空闲时约 11 MB 内存，启动约 5 秒 |
+| 轻量 | 不额外配置完整虚拟机；macOS 复用 Docker 的 Linux 环境，实际开销取决于运行时和任务 |
 | 易用 | 一个 bash 脚本 `aibox`：init / up / shell / stop / doctor |
 | 可扩展 | 网关可插拔（`gateways/*.yaml`）；同一套 compose 在 macOS / Linux / Windows(WSL2) 上通用 |
 
@@ -43,8 +45,8 @@
 
 | 组件 | 来源 | aibox 做了什么 |
 |---|---|---|
-| gluetun（VPN 模式） | `qmcgaw/gluetun` 官方镜像 | 只写了 compose，没改代码 |
-| mihomo（代理模式） | `metacubex/mihomo` 官方二进制 | 加了约 150 行的 entrypoint（防火墙、生成配置、守护进程）和上游校验脚本 |
+| gluetun（VPN 模式） | `qmcgaw/gluetun` 官方镜像 | 仅做编排，上游代码及许可独立保留 |
+| mihomo（代理模式） | `metacubex/mihomo` 官方二进制 | 增加启动脚本（防火墙、配置生成、守护进程）与上游校验 |
 | workspace | `node:24-trixie-slim` | 开发工具、UID 对齐、tmux 配置 |
 | Claude Code / Codex | 官方安装器 / npm | 首次启动经隧道装进 home 卷，之后可以自动更新 |
 
@@ -99,14 +101,14 @@ gluetun 自带 kill switch（iptables 只放行到 VPN 服务器的连接）、D
 | 经授权目录改动网关配置 | 拒绝挂载 aibox 自身目录，以及包含它的上级目录 | — |
 | 逃逸到 Docker | 不挂载 docker.sock，非 privileged | — |
 
-边界说明：镜像拉取和 `docker build` 走宿主机网络，不在运行时隔离的范围内。构建镜像时只会访问 Debian 和 npm 的源，AI 工具在运行时经隧道安装。
+边界说明：镜像拉取和 `docker build` 使用 Docker 所在主机的网络，不在工作容器运行时隔离的范围内；会访问镜像仓库、Debian / Alpine 软件源等。AI 工具在运行时经网关安装。
 
 ## 5. 文件与持久化
 
 - 授权目录 → `/workspace/<名称>`，也可以用 `-> /path` 指定容器内路径。
 - 构建镜像时让容器内 `dev` 用户的 UID/GID 与宿主机一致，新建文件的归属就是正确的（macOS 通常是 501:20）。
 - `/home/dev` 是命名卷：AI 工具本体、登录凭据、shell 历史、npm 全局包都在里面，`down` 或 `rebuild` 后都还在。
-- 环境检测报告（`aibox report`）：查询出口 IP 信息（ipinfo.io、proxycheck.io、ip-api.com、StopForumSpam）的请求都在 workspace 里经代理发出，这些服务只看到出口 IP；只有"本机"一节（真实 IPv4 / IPv6、本机 DNS）从宿主机直连查询。
+- 环境检测报告（`aibox report`）：查询出口 IP 信息（ipinfo.io、proxycheck.io、ip-api.com、StopForumSpam）的请求都在 workspace 里经代理发出，这些服务只看到出口 IP；“本机”一节从宿主机发起查询，已有代理可能影响结果，不能直接当作真实宽带出口。
 - 构建时设置 `BUILDX_NO_DEFAULT_ATTESTATIONS=1`：provenance 证明带有构建时间，会让镜像 ID 每次都变，导致每次 `up` 都重建容器、中断 tmux 会话。
 - AI 工具不打进镜像，也不预装：第一次使用时经网关安装到 home 卷。安装入口是 `/usr/local/bin` 下的同名脚本（排在 PATH 最后），装好后用 `exec` 替换成真正的程序，中间没有多余的进程。在交互式容器 shell 里输入工具名时，`/etc/aibox/bashrc` 会用 `exec` 让工具替换这个 shell：工具运行期间没有 bash 在等待，Ctrl+C 只交给工具，bash 不可能在工具界面里打印提示符；在 tmux 会话里则为工具新开一个 tmux 窗口，工具直接由 tmux 启动，退出后回到原来的窗口；`aibox claude` 同样是工具直接作为 `docker exec` 的进程。
 - 时区和语言跟随出口 IP 的地区：`aibox up` 在 workspace 里经隧道查询 ipinfo.io（备用 ip-api.com），生成对应 locale，写入 `~/.config/aibox/locale.env`，由登录 shell 和 `aibox` 的 `docker exec -e` 生效。不写进容器环境变量，地区变化时不需要重建容器（不会中断 tmux 会话）。
@@ -145,6 +147,6 @@ gluetun 自带 kill switch（iptables 只放行到 VPN 服务器的连接）、D
 
 ## 7. 已知限制与后续计划
 
-- 网关容器被单独重启后，工作区会先断网（这是 fail-closed 的表现），再执行任意 `aibox` 命令会自动重新接入。
+- 网关容器被单独重启后，工作区会先断网（这是 fail-closed 的表现），再执行启动或进入环境的命令会重新接入；`compare` 只读，不触发修复。
 - 节点本身部署在局域网或 Tailscale（100.64/10）里时也会被拒绝。这是严格策略的代价，目前不提供例外开关。
 - 计划：Windows PowerShell 包装脚本、多个工作区实例（`AIBOX_NAME`）、订阅作入口的链式代理、`aibox node` 节点查看与切换。

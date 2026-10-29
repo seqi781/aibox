@@ -6,11 +6,14 @@
   <p>
     <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20WSL2-orange" alt="macOS、Linux、WSL2" />
     <img src="https://img.shields.io/badge/Docker-Required-2496ED?logo=docker&amp;logoColor=white" alt="需要 Docker" />
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Personal_Use-orange" alt="允许个人使用，限制再分发" /></a>
   </p>
-  <p><a href="#quick-start">快速开始</a> · <a href="#demo">完整演示</a> · <a href="#compare">本机对比</a> · <a href="#faq">常见问题</a> · <a href="docs/GUIDE.md">使用指南</a></p>
+  <p><a href="#quick-start">快速开始</a> · <a href="#demo">完整演示</a> · <a href="#compare">本机对比</a> · <a href="#faq">常见问题</a> · <a href="docs/README.md">文档目录</a> · <a href="#license">使用许可</a></p>
 </div>
 
 你照常用现在的终端。aibox 把 **Claude Code / Codex** 放在单独的 Docker 环境里，上网用你选的远程节点，本机文件只开放你选中的项目文件夹。
+
+> **许可**：允许个人下载、安装和本地使用，无需另行申请。未经书面授权，禁止搬运、改名发布、二次分发和售卖。[查看许可](LICENSE) · [授权说明](docs/LICENSING.md)
 
 ## 为什么用 aibox？
 
@@ -40,6 +43,8 @@
 <a id="quick-start"></a>
 
 ## 快速开始
+
+个人用户可以直接按以下步骤安装和使用；转载、分发或提供商业服务等超出个人使用的行为，按许可另行授权。
 
 ### 先准备好
 
@@ -130,6 +135,8 @@ CPU核心       10                      10                     ⚠ =
 - 截图分享用 `aibox compare --redact`，隐藏 IP、电脑名和 ID。
 - 不查询上网 IP，用 `aibox compare --offline`。
 - 更新前的旧容器不算已受保护；新防护需要重建后生效，对比命令不会替你中断任务。
+
+字段、返回码和旧容器的处理方法见[对比说明](docs/COMPARE.md)。
 
 ## 日常命令
 
@@ -229,10 +236,21 @@ macOS 下仍需要 Docker 的 Linux 运行环境，但不必另外配置完整�
 
 ## 文档、服务与交流
 
+- [文档目录](docs/README.md)：按配置、对比、排错、维护和许可查找说明。
 - [使用指南](docs/GUIDE.md)：配置、登录、常用操作和报错处理。
 - [提交问题或建议](https://github.com/seqi781/aibox/issues)：写清系统、操作和报错，隐藏节点链接、密码、密钥及真实 IP。
 - [UseHooo 服务页面](https://usehooo.com/aibox)：配置协助及相关服务；具体项目与售后规则以服务页面为准。
 - [Telegram 交流入口](https://t.me/+3wcYpPtDyR9lNjE1)。
+
+<a id="license"></a>
+
+## 使用与转载许可
+
+原创代码、文档及素材采用[个人使用许可与权利保留声明](LICENSE)，不是 MIT 或其他开源许可。个人可直接下载、安装、本地运行，修改自己的配置，并制作仅供自己使用的镜像和备份。
+
+未经书面授权，不得搬运到新仓库、改名发布、二次打包分发或售卖；源码改作、组织部署及对外提供本项目的商业服务也需另行授权。个人处理自己的学习或工作项目，以及对自有成果的依法利用，不受这些限制。
+
+公开仓库仍受 GitHub 的站内浏览和 Fork 规则约束，协议不能从技术上阻止下载。申请方式见[许可说明](docs/LICENSING.md)，上游组件继续适用[各自许可](docs/THIRD_PARTY_NOTICES.md)。外部服务或社群链接不构成本项目的版权授权。
 
 <details>
 <summary>查看配置截图、宣传素材与开发文档</summary>
